@@ -331,6 +331,8 @@
         let isPlayingAudio = false;
         let pendingAudioBuffer = null;
         let currentAudioSource = null;
+        let audioBufferQueue = []; // 存储正在构建的句子音频块
+        let currentSentenceId = null; // 当前正在构建的句子ID
         
         // Check browser compatibility
         function checkBrowserCompatibility() {
@@ -386,10 +388,31 @@
             
             socket.onmessage = function(event) {
                 try {
-                    const data = JSON.parse(event.data);
-                    handleSocketMessage(data);
+                    // 判断消息类型（文本或二进制）
+                    if (typeof event.data === 'string') {
+                        // JSON消息
+                        const data = JSON.parse(event.data);
+                        
+                        // 如果是二进制头部消息，准备接收二进制数据
+                        if (data.type === 'tts_binary_header') {
+                            // 设置当前接收的二进制头信息，后续的二进制数据会使用这个
+                            window.currentBinaryHeader = data;
+                            return;
+                        }
+                        
+                        // 处理普通JSON消息
+                        handleSocketMessage(data);
+                    } else if (event.data instanceof Blob) {
+                        // 二进制数据，通常是在tts_binary_header之后
+                        if (window.currentBinaryHeader) {
+                            handleBinaryAudioData(event.data, window.currentBinaryHeader);
+                            window.currentBinaryHeader = null; // 清除头信息
+                        } else {
+                            console.error('收到二进制数据但没有对应的头信息');
+                        }
+                    }
                 } catch (e) {
-                    console.error('Error parsing message:', e);
+                    console.error('Error processing message:', e);
                 }
             };
             
@@ -410,7 +433,25 @@
         // 初始化音频上下文
         function initAudioContext() {
             try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                if (audioContext) {
+                    // 如果已经存在并且状态是running或suspended，则直接使用
+                    if (audioContext.state === "running" || audioContext.state === "suspended") {
+                        if (audioContext.state === "suspended") {
+                            audioContext.resume();
+                        }
+                        return true;
+                    }
+                    
+                    // 如果状态是closed，则需要创建新的
+                    try {
+                        audioContext.close();
+                    } catch (e) {
+                        console.warn("Error closing old audio context:", e);
+                    }
+                }
+                
+                // 创建新的音频上下文
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 console.log(`Audio context initialized with sample rate: ${audioContext.sampleRate}Hz`);
                 return true;
             } catch (e) {
@@ -431,6 +472,12 @@
         
         // 将PCM数据转换为AudioBuffer
         async function pcmToAudioBuffer(pcmData) {
+            if (!audioContext) {
+                if (!initAudioContext()) {
+                    throw new Error("Failed to initialize audio context");
+                }
+            }
+            
             // 创建16位PCM AudioBuffer
             const audioBuffer = audioContext.createBuffer(1, pcmData.byteLength / 2, 16000);
             
@@ -445,6 +492,245 @@
             }
             
             return audioBuffer;
+        }
+        
+        // 处理WebSocket消息
+        function handleSocketMessage(data) {
+            switch (data.type) {
+                case 'partial_transcript':
+                    partialTranscript.textContent = data.content;
+                    break;
+                
+                case 'final_transcript':
+                    finalTranscript.textContent = data.content;
+                    // Add to history
+                    addToHistory(data.content, 'user');
+                    // Clear partial after a short delay
+                    setTimeout(() => {
+                        partialTranscript.textContent = '';
+                    }, 1000);
+                    break;
+                
+                case 'llm_status':
+                    if (data.status === 'processing') {
+                        updateStatus('thinking', 'AI思考中...');
+                        llmStatus.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div> AI思考中...';
+                        llmResponse.textContent = '';
+                        
+                        // 初始化音频上下文（如果尚未初始化）
+                        initAudioContext();
+                        
+                        // 停止所有正在播放的音频
+                        stopAudioPlayback();
+                        
+                        // 清空音频缓冲区
+                        audioBufferQueue = [];
+                        currentSentenceId = null;
+                    }
+                    break;
+                
+                case 'llm_response':
+                    // Show streaming response
+                    llmResponse.textContent = data.content;
+                    
+                    // If response is complete
+                    if (data.is_complete) {
+                        // Update status
+                        updateStatus('idle', '已完成');
+                        llmStatus.textContent = '回答已完成';
+                        
+                        // Add to history
+                        addToHistory(data.content, 'llm');
+                        
+                        // Clear status after delay
+                        setTimeout(() => {
+                            llmStatus.textContent = '';
+                        }, 2000);
+                    }
+                    break;
+                
+                case 'tts_sentence_start':
+                    // 句子开始标记，记录当前句子ID
+                    currentSentenceId = data.sentence_id;
+                    if (data.is_first) {
+                        console.log(`准备播放第一个句子: ${data.text}`);
+                    }
+                    break;
+                
+                case 'tts_sentence_end':
+                    // 句子结束标记，确保所有块都被处理
+                    console.log(`句子播放完成: ${data.text}`);
+                    
+                    // 如果还有待处理的缓冲区，强制处理
+                    if (audioBufferQueue.length > 0 && currentSentenceId === data.sentence_id) {
+                        handleCompleteSentence();
+                    }
+                    
+                    // 重置当前句子ID
+                    if (currentSentenceId === data.sentence_id) {
+                        currentSentenceId = null;
+                    }
+                    break;
+                
+                case 'tts_audio_chunk':
+                    // 处理流式TTS音频块（兼容旧版base64格式）
+                    if (data.is_last_chunk) {
+                        // 这是最后一个块，标记流式播放结束
+                        console.log(`TTS流式结束: ${data.text || "未知文本"}`);
+                        
+                        // 如果还有待处理的缓冲区，合并并播放
+                        if (audioBufferQueue.length > 0 && currentSentenceId) {
+                            handleCompleteSentence();
+                        }
+                        
+                        // 重置当前句子ID
+                        currentSentenceId = null;
+                    } else if (data.audio) {
+                        // 获取这个块的音频数据
+                        try {
+                            // 解码音频数据
+                            const pcmData = decodeBase64ToPCM(data.audio);
+                            
+                            // 处理音频块
+                            handleAudioChunk(pcmData, data);
+                        } catch (e) {
+                            console.error('处理音频块出错:', e);
+                        }
+                    } else if (data.rawAudio) {
+                        // 直接处理原始音频数据
+                        handleAudioChunk(data.rawAudio, data);
+                    }
+                    break;
+                
+                case 'tts_audio':
+                    // 处理老的TTS音频格式（为了兼容）
+                    if (data.audio) {
+                        try {
+                            const pcmData = decodeBase64ToPCM(data.audio);
+                            playLegacyAudio(pcmData, data.is_first);
+                        } catch (e) {
+                            console.error('处理完整音频出错:', e);
+                        }
+                    }
+                    break;
+                
+                case 'status':
+                    if (data.status === 'listening') {
+                        updateStatus('listening', '正在听取...');
+                    } else if (data.status === 'stopped') {
+                        updateStatus('idle', '已停止');
+                    }
+                    break;
+                
+                case 'error':
+                    console.error('Server error:', data.message);
+                    updateStatus('error', `错误: ${data.message}`);
+                    llmStatus.textContent = data.message;
+                    break;
+                
+                default:
+                    console.log('Unhandled message type:', data.type, data);
+            }
+        }
+        
+        // 处理单个音频块
+        function handleAudioChunk(pcmData, data) {
+            // 确保音频上下文已初始化
+            if (!audioContext && !initAudioContext()) {
+                console.error("无法初始化音频上下文");
+                return;
+            }
+            
+            // 确保音频上下文处于活动状态
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            // 将PCM数据添加到当前句子的缓冲区
+            pcmToAudioBuffer(pcmData).then(audioBuffer => {
+                audioBufferQueue.push({
+                    buffer: audioBuffer,
+                    isFirst: data.is_first || data.chunk_number === 1,
+                    text: data.text || "",
+                    chunkNumber: data.chunk_number || 0
+                });
+                
+                // 如果这是第一个块，并且我们没有正在播放的音频，则开始处理句子
+                if ((data.is_first || data.chunk_number === 1) && !isPlayingAudio && audioQueue.length === 0) {
+                    handleCompleteSentence();
+                }
+                
+                // 如果缓冲区已经足够大，也开始处理
+                if (audioBufferQueue.length >= 5) {
+                    handleCompleteSentence();
+                }
+            });
+        }
+        
+        // 处理完整的句子（或句子的一部分）
+        function handleCompleteSentence() {
+            if (audioBufferQueue.length === 0) return;
+            
+            // 将多个小缓冲区合并为一个
+            let totalLength = 0;
+            let firstChunk = audioBufferQueue[0]; // 获取第一个块的信息
+            
+            // 计算总长度
+            for (let item of audioBufferQueue) {
+                totalLength += item.buffer.length;
+            }
+            
+            // 创建合并后的缓冲区
+            const mergedBuffer = audioContext.createBuffer(1, totalLength, 16000);
+            const channelData = mergedBuffer.getChannelData(0);
+            
+            // 复制数据
+            let offset = 0;
+            for (let item of audioBufferQueue) {
+                const itemData = item.buffer.getChannelData(0);
+                channelData.set(itemData, offset);
+                offset += item.buffer.length;
+            }
+            
+            // 将合并后的缓冲区添加到播放队列
+            playOrQueueBuffer(mergedBuffer, firstChunk.isFirst, firstChunk.text);
+            
+            // 清空缓冲区
+            audioBufferQueue = [];
+        }
+        
+        // 播放旧版完整音频（为兼容保留）
+        function playLegacyAudio(pcmData, isFirst) {
+            // 确保音频上下文已初始化
+            if (!audioContext && !initAudioContext()) {
+                console.error("无法初始化音频上下文");
+                return false;
+            }
+            
+            // 确保音频上下文处于活动状态
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            // 转换为AudioBuffer并播放
+            pcmToAudioBuffer(pcmData).then(audioBuffer => {
+                playOrQueueBuffer(audioBuffer, isFirst);
+            });
+        }
+        
+        // 播放或排队音频缓冲区
+        function playOrQueueBuffer(audioBuffer, isFirst, text) {
+            if (isFirst) {
+                console.log(`开始播放新的音频: ${text || "无文本"}`);
+            }
+            
+            if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
+                // 直接播放
+                playAudioBuffer(audioBuffer);
+            } else {
+                // 添加到队列
+                audioQueue.push(audioBuffer);
+            }
         }
         
         // 播放音频缓冲区
@@ -474,51 +760,18 @@
                 // 开始播放
                 source.start(0);
                 isPlayingAudio = true;
-                console.log('Started playing audio');
+                console.log('Started playing audio, buffer length:', audioBuffer.length);
                 
                 return true;
             } catch (e) {
                 console.error('Error playing audio:', e);
-                return false;
-            }
-        }
-        
-        // 将音频添加到队列并开始播放
-        async function queueAudio(base64PCM, isFirst) {
-            try {
-                // 解码音频数据
-                const pcmData = decodeBase64ToPCM(base64PCM);
-                
-                // 转换为AudioBuffer
-                const audioBuffer = await pcmToAudioBuffer(pcmData);
-                
-                // 恢复音频上下文（如果被暂停）
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-                
-                console.log('Queueing audio, isFirst:', isFirst, 'isPlaying:', isPlayingAudio, 'queueLength:', audioQueue.length);
-                
-                // 如果是第一个音频块或者我们需要立即播放
-                if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
-                    // 直接播放
-                    playAudioBuffer(audioBuffer);
-                } else {
-                    // 添加到队列等待播放
-                    audioQueue.push(audioBuffer);
-                    console.log('Added to queue, new length:', audioQueue.length);
-                }
-                
-                return true;
-            } catch (e) {
-                console.error('Error queuing audio:', e);
+                isPlayingAudio = false;
                 return false;
             }
         }
         
         // 播放队列中的下一个音频
         function playNextAudio() {
-            console.log('playNextAudio called, queue length:', audioQueue.length, 'isPlaying:', isPlayingAudio);
             if (audioQueue.length > 0 && !isPlayingAudio) {
                 // 从队列中获取下一个音频
                 const nextAudio = audioQueue.shift();
@@ -544,89 +797,8 @@
             
             // 清空队列
             audioQueue = [];
+            audioBufferQueue = [];
             isPlayingAudio = false;
-        }
-        
-        // Handle WebSocket messages
-        function handleSocketMessage(data) {
-            switch (data.type) {
-                case 'partial_transcript':
-                    partialTranscript.textContent = data.content;
-                    break;
-                
-                case 'final_transcript':
-                    finalTranscript.textContent = data.content;
-                    // Add to history
-                    addToHistory(data.content, 'user');
-                    // Clear partial after a short delay
-                    setTimeout(() => {
-                        partialTranscript.textContent = '';
-                    }, 1000);
-                    break;
-                
-                case 'llm_status':
-                    if (data.status === 'processing') {
-                        updateStatus('thinking', 'AI思考中...');
-                        llmStatus.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div> AI思考中...';
-                        llmResponse.textContent = '';
-                        
-                        // 初始化音频上下文（如果尚未初始化）
-                        if (!audioContext) {
-                            initAudioContext();
-                        }
-                        
-                        // 停止所有正在播放的音频
-                        stopAudioPlayback();
-                    }
-                    break;
-                
-                case 'llm_response':
-                    // Show streaming response
-                    llmResponse.textContent = data.content;
-                    
-                    // If response is complete
-                    if (data.is_complete) {
-                        // Update status
-                        updateStatus('idle', '已完成');
-                        llmStatus.textContent = '回答已完成';
-                        
-                        // Add to history
-                        addToHistory(data.content, 'llm');
-                        
-                        // Clear status after delay
-                        setTimeout(() => {
-                            llmStatus.textContent = '';
-                        }, 2000);
-                    }
-                    break;
-                
-                case 'tts_audio':
-                    // 处理TTS音频数据
-                    queueAudio(data.audio, data.is_first)
-                        .then(success => {
-                            if (!success) {
-                                console.error('Failed to queue audio for playback');
-                            }
-                        });
-                    break;
-                
-                case 'status':
-                    if (data.status === 'listening') {
-                        updateStatus('listening', '正在听取...');
-                    } else if (data.status === 'stopped') {
-                        updateStatus('idle', '已停止');
-                    }
-                    break;
-                
-                case 'error':
-                    console.error('Server error:', data.message);
-                    updateStatus('error', `错误: ${data.message}`);
-                    llmStatus.textContent = data.message;
-                    break;
-                
-                default:
-                    console.log('Unhandled message type:', data.type, data);
-            }
         }
         
         // Update status indicator
@@ -715,6 +887,39 @@
                 }
                 
                 logAudioState.lastLog = Date.now();
+            }
+        }
+        
+        // 处理二进制音频数据
+        async function handleBinaryAudioData(blob, header) {
+            try {
+                // 确保音频上下文已初始化
+                if (!audioContext) {
+                    initAudioContext();
+                }
+                
+                // 将Blob转换为ArrayBuffer
+                const arrayBuffer = await blob.arrayBuffer();
+                
+                // 处理音频块
+                const data = {
+                    type: 'tts_audio_chunk',
+                    is_chunk: true,
+                    chunk_number: header.chunk_number,
+                    is_first: header.is_first_chunk,
+                    sentence_id: header.sentence_id,
+                    session_id: header.session_id,
+                    rawAudio: arrayBuffer // 直接使用原始音频数据
+                };
+                
+                // 开始处理音频块
+                handleAudioChunk(arrayBuffer, data);
+                
+                if (header.is_first_chunk) {
+                    console.log(`开始播放新的二进制音频流: 块 #${header.chunk_number}`);
+                }
+            } catch (e) {
+                console.error('处理二进制音频数据出错:', e);
             }
         }
         
