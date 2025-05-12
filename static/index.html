@@ -313,6 +313,9 @@
         let resampleRequired = false;
         let originalSampleRate = 0;
         
+        // AI响应状态
+        let isAIResponding = false; // 新增：追踪AI是否正在响应
+        
         // DOM elements
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
@@ -327,12 +330,15 @@
         const browserWarning = document.getElementById('browser-warning');
         
         // 音频播放相关变量
-        let audioQueue = [];
-        let isPlayingAudio = false;
-        let pendingAudioBuffer = null;
-        let currentAudioSource = null;
-        let audioBufferQueue = []; // 存储正在构建的句子音频块
-        let currentSentenceId = null; // 当前正在构建的句子ID
+        let audioQueue = [];               // 音频缓冲区队列
+        let isPlayingAudio = false;        // 是否正在播放音频
+        let pendingAudioBuffer = null;     // 待处理的音频缓冲区
+        let currentAudioSource = null;     // 当前音频源
+        let audioBufferQueue = [];         // 存储正在构建的句子音频块
+        let currentSentenceId = null;      // 当前正在构建的句子ID
+        let activeSentences = new Map();   // 当前活动的句子，键为句子ID，值为句子数据
+        let sentencePlayQueue = [];        // 句子播放队列
+        let isProcessingSentence = false;  // 是否正在处理句子
         
         // Check browser compatibility
         function checkBrowserCompatibility() {
@@ -381,7 +387,8 @@
             socket = new WebSocket(wsUrl);
             
             socket.onopen = function(event) {
-                console.log('WebSocket connected');
+                console.log('WebSocket连接成功');
+                showDebugMessage('WebSocket连接成功');
                 updateStatus('idle', '已连接，准备就绪');
                 startBtn.disabled = !checkBrowserCompatibility();
             };
@@ -395,6 +402,9 @@
                         
                         // 如果是二进制头部消息，准备接收二进制数据
                         if (data.type === 'tts_binary_header') {
+                            console.log(`收到二进制头信息: 块 #${data.chunk_number}, 句子ID: ${data.sentence_id}`);
+                            showDebugMessage(`收到二进制头信息: 块 #${data.chunk_number}`);
+                            
                             // 设置当前接收的二进制头信息，后续的二进制数据会使用这个
                             window.currentBinaryHeader = data;
                             return;
@@ -404,30 +414,159 @@
                         handleSocketMessage(data);
                     } else if (event.data instanceof Blob) {
                         // 二进制数据，通常是在tts_binary_header之后
+                        showDebugMessage(`收到二进制数据: ${event.data.size}字节`);
+                        
                         if (window.currentBinaryHeader) {
                             handleBinaryAudioData(event.data, window.currentBinaryHeader);
                             window.currentBinaryHeader = null; // 清除头信息
                         } else {
                             console.error('收到二进制数据但没有对应的头信息');
+                            showDebugMessage('错误: 收到二进制数据但没有头信息');
                         }
                     }
                 } catch (e) {
-                    console.error('Error processing message:', e);
+                    console.error('处理消息时出错:', e);
+                    showDebugMessage(`处理消息错误: ${e.message}`);
                 }
             };
             
             socket.onclose = function(event) {
-                console.log('WebSocket closed');
+                console.log('WebSocket连接关闭');
+                showDebugMessage('WebSocket连接关闭');
                 updateStatus('error', '连接已断开');
                 startBtn.disabled = true;
                 stopBtn.disabled = true;
                 isRecording = false;
+                
+                // 5秒后尝试重连
+                setTimeout(function() {
+                    console.log('尝试重新连接...');
+                    showDebugMessage('尝试重新连接...');
+                    initializeWebSocket();
+                }, 5000);
             };
             
             socket.onerror = function(error) {
-                console.error('WebSocket error:', error);
+                console.error('WebSocket错误:', error);
+                showDebugMessage('WebSocket错误');
                 updateStatus('error', '连接错误');
             };
+        }
+        
+        // 显示调试信息
+        function showDebugMessage(message) {
+            // 创建调试区域（如果不存在）
+            let debugArea = document.getElementById('debug-area');
+            if (!debugArea) {
+                debugArea = document.createElement('div');
+                debugArea.id = 'debug-area';
+                debugArea.style.position = 'fixed';
+                debugArea.style.bottom = '10px';
+                debugArea.style.right = '10px';
+                debugArea.style.width = '300px';
+                debugArea.style.maxHeight = '200px';
+                debugArea.style.overflow = 'auto';
+                debugArea.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                debugArea.style.color = 'white';
+                debugArea.style.padding = '10px';
+                debugArea.style.borderRadius = '5px';
+                debugArea.style.fontSize = '12px';
+                debugArea.style.fontFamily = 'monospace';
+                debugArea.style.zIndex = '1000';
+                document.body.appendChild(debugArea);
+            }
+            
+            // 添加消息
+            const msgElement = document.createElement('div');
+            msgElement.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            debugArea.appendChild(msgElement);
+            
+            // 保持滚动到底部
+            debugArea.scrollTop = debugArea.scrollHeight;
+            
+            // 限制消息数量
+            while (debugArea.childNodes.length > 20) {
+                debugArea.removeChild(debugArea.firstChild);
+            }
+        }
+        
+        // 音频工具栏
+        function addAudioToolbar() {
+            let toolbar = document.getElementById('audio-toolbar');
+            if (!toolbar) {
+                toolbar = document.createElement('div');
+                toolbar.id = 'audio-toolbar';
+                toolbar.style.position = 'fixed';
+                toolbar.style.top = '10px';
+                toolbar.style.right = '10px';
+                toolbar.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                toolbar.style.color = 'white';
+                toolbar.style.padding = '10px';
+                toolbar.style.borderRadius = '5px';
+                toolbar.style.zIndex = '1000';
+                
+                // 创建按钮
+                const testAudioBtn = document.createElement('button');
+                testAudioBtn.textContent = '测试音频';
+                testAudioBtn.style.marginRight = '5px';
+                testAudioBtn.onclick = testAudioPlayback;
+                
+                const resetAudioBtn = document.createElement('button');
+                resetAudioBtn.textContent = '重置音频';
+                resetAudioBtn.onclick = resetAudioContext;
+                
+                // 添加按钮到工具栏
+                toolbar.appendChild(testAudioBtn);
+                toolbar.appendChild(resetAudioBtn);
+                
+                document.body.appendChild(toolbar);
+            }
+        }
+        
+        // 测试音频播放
+        function testAudioPlayback() {
+            if (!audioContext) {
+                initAudioContext();
+            }
+            
+            showDebugMessage('测试音频播放');
+            
+            // 创建测试音频（1秒的440Hz正弦波）
+            const duration = 1;
+            const sampleRate = audioContext.sampleRate;
+            const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
+            
+            for (let i = 0; i < buffer.length; i++) {
+                data[i] = Math.sin(440 * Math.PI * 2 * i / sampleRate);
+            }
+            
+            // 播放测试音频
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start();
+            
+            showDebugMessage('测试音频开始播放');
+        }
+        
+        // 重置音频上下文
+        function resetAudioContext() {
+            showDebugMessage('正在重置音频上下文...');
+            
+            if (audioContext) {
+                audioContext.close().then(() => {
+                    audioContext = null;
+                    showDebugMessage('音频上下文已关闭');
+                    initAudioContext();
+                    showDebugMessage('音频上下文已重新初始化');
+                }).catch(err => {
+                    showDebugMessage(`关闭音频上下文错误: ${err.message}`);
+                });
+            } else {
+                initAudioContext();
+                showDebugMessage('音频上下文已初始化');
+            }
         }
         
         // 初始化音频上下文
@@ -478,20 +617,28 @@
                 }
             }
             
-            // 创建16位PCM AudioBuffer
-            const audioBuffer = audioContext.createBuffer(1, pcmData.byteLength / 2, 16000);
+            console.log(`转换PCM数据到AudioBuffer, 大小: ${pcmData.byteLength} 字节`);
             
-            // 获取音频通道数据
-            const channelData = audioBuffer.getChannelData(0);
-            
-            // 将PCM数据转换为Float32Array
-            const pcmInt16 = new Int16Array(pcmData);
-            for (let i = 0; i < pcmInt16.length; i++) {
-                // 将16位PCM值（-32768到32767）转换为-1.0到1.0范围的float
-                channelData[i] = pcmInt16[i] / 32768.0;
+            try {
+                // 创建16位PCM AudioBuffer
+                const audioBuffer = audioContext.createBuffer(1, pcmData.byteLength / 2, 16000);
+                
+                // 获取音频通道数据
+                const channelData = audioBuffer.getChannelData(0);
+                
+                // 将PCM数据转换为Float32Array
+                const pcmInt16 = new Int16Array(pcmData);
+                for (let i = 0; i < pcmInt16.length; i++) {
+                    // 将16位PCM值（-32768到32767）转换为-1.0到1.0范围的float
+                    channelData[i] = pcmInt16[i] / 32768.0;
+                }
+                
+                console.log(`PCM转换完成, 样本数: ${channelData.length}`);
+                return audioBuffer;
+            } catch (e) {
+                console.error('PCM转换失败:', e);
+                throw e;
             }
-            
-            return audioBuffer;
         }
         
         // 处理WebSocket消息
@@ -523,9 +670,11 @@
                         // 停止所有正在播放的音频
                         stopAudioPlayback();
                         
-                        // 清空音频缓冲区
-                        audioBufferQueue = [];
-                        currentSentenceId = null;
+                        // 清空所有句子相关状态
+                        clearAllSentences();
+                        
+                        // 新增：标记AI开始响应
+                        isAIResponding = true;
                     }
                     break;
                 
@@ -546,30 +695,23 @@
                         setTimeout(() => {
                             llmStatus.textContent = '';
                         }, 2000);
+                        
+                        // 新增：标记AI响应结束
+                        isAIResponding = false;
                     }
                     break;
                 
                 case 'tts_sentence_start':
-                    // 句子开始标记，记录当前句子ID
-                    currentSentenceId = data.sentence_id;
-                    if (data.is_first) {
-                        console.log(`准备播放第一个句子: ${data.text}`);
-                    }
+                    // 句子开始标记，初始化句子状态
+                    initSentence(data.sentence_id, data.text, data.is_first);
                     break;
                 
                 case 'tts_sentence_end':
-                    // 句子结束标记，确保所有块都被处理
-                    console.log(`句子播放完成: ${data.text}`);
+                    // 句子结束标记，标记句子完成
+                    finalizeSentence(data.sentence_id);
                     
-                    // 如果还有待处理的缓冲区，强制处理
-                    if (audioBufferQueue.length > 0 && currentSentenceId === data.sentence_id) {
-                        handleCompleteSentence();
-                    }
-                    
-                    // 重置当前句子ID
-                    if (currentSentenceId === data.sentence_id) {
-                        currentSentenceId = null;
-                    }
+                    // 确保句子被处理
+                    processSentenceQueue();
                     break;
                 
                 case 'tts_audio_chunk':
@@ -578,13 +720,15 @@
                         // 这是最后一个块，标记流式播放结束
                         console.log(`TTS流式结束: ${data.text || "未知文本"}`);
                         
-                        // 如果还有待处理的缓冲区，合并并播放
-                        if (audioBufferQueue.length > 0 && currentSentenceId) {
-                            handleCompleteSentence();
+                        // 如果有句子ID，标记句子完成
+                        if (data.sentence_id) {
+                            finalizeSentence(data.sentence_id);
+                        } else if (currentSentenceId) {
+                            finalizeSentence(currentSentenceId);
                         }
                         
-                        // 重置当前句子ID
-                        currentSentenceId = null;
+                        // 确保句子被处理
+                        processSentenceQueue();
                     } else if (data.audio) {
                         // 获取这个块的音频数据
                         try {
@@ -592,13 +736,23 @@
                             const pcmData = decodeBase64ToPCM(data.audio);
                             
                             // 处理音频块
-                            handleAudioChunk(pcmData, data);
+                            const sentenceId = data.sentence_id || currentSentenceId;
+                            if (sentenceId) {
+                                addAudioChunk(sentenceId, pcmData, data);
+                            } else {
+                                console.warn("收到音频块但没有关联的句子ID");
+                            }
                         } catch (e) {
                             console.error('处理音频块出错:', e);
                         }
                     } else if (data.rawAudio) {
                         // 直接处理原始音频数据
-                        handleAudioChunk(data.rawAudio, data);
+                        const sentenceId = data.sentence_id || currentSentenceId;
+                        if (sentenceId) {
+                            addAudioChunk(sentenceId, data.rawAudio, data);
+                        } else {
+                            console.warn("收到音频块但没有关联的句子ID");
+                        }
                     }
                     break;
                 
@@ -628,56 +782,329 @@
                     llmStatus.textContent = data.message;
                     break;
                 
+                case 'server_interrupt':
+                    // 新增：处理服务器发送的打断信令
+                    console.log("收到服务器打断信令:", data.message);
+                    
+                    // 清空所有正在播放的音频
+                    stopAudioPlayback();
+                    
+                    // 更新UI状态
+                    updateStatus('listening', '已打断，正在听取...');
+                    llmStatus.textContent = '响应已打断';
+                    isAIResponding = false;
+                    
+                    // 显示通知（可选）
+                    const notification = document.createElement('div');
+                    notification.className = 'interrupt-notification';
+                    notification.textContent = '检测到新的语音输入，AI响应已打断';
+                    notification.style.position = 'fixed';
+                    notification.style.top = '20px';
+                    notification.style.left = '50%';
+                    notification.style.transform = 'translateX(-50%)';
+                    notification.style.padding = '10px 20px';
+                    notification.style.backgroundColor = 'rgba(255, 87, 34, 0.9)';
+                    notification.style.color = 'white';
+                    notification.style.borderRadius = '4px';
+                    notification.style.zIndex = '1000';
+                    document.body.appendChild(notification);
+                    
+                    // 1.5秒后移除通知
+                    setTimeout(() => {
+                        document.body.removeChild(notification);
+                    }, 1500);
+                    break;
+                
                 default:
                     console.log('Unhandled message type:', data.type, data);
             }
         }
         
-        // 处理单个音频块
-        function handleAudioChunk(pcmData, data) {
-            // 确保音频上下文已初始化
-            if (!audioContext && !initAudioContext()) {
-                console.error("无法初始化音频上下文");
-                return;
-            }
-            
-            // 确保音频上下文处于活动状态
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            
-            // 将PCM数据添加到当前句子的缓冲区
-            pcmToAudioBuffer(pcmData).then(audioBuffer => {
-                audioBufferQueue.push({
-                    buffer: audioBuffer,
-                    isFirst: data.is_first || data.chunk_number === 1,
-                    text: data.text || "",
-                    chunkNumber: data.chunk_number || 0
-                });
+        // 处理二进制音频数据
+        async function handleBinaryAudioData(blob, header) {
+            try {
+                console.log(`收到二进制音频块: #${header.chunk_number}, 大小: ${blob.size}字节`);
                 
-                // 如果这是第一个块，并且我们没有正在播放的音频，则开始处理句子
-                if ((data.is_first || data.chunk_number === 1) && !isPlayingAudio && audioQueue.length === 0) {
-                    handleCompleteSentence();
+                // 确保音频上下文已初始化
+                if (!audioContext) {
+                    initAudioContext();
                 }
                 
-                // 如果缓冲区已经足够大，也开始处理
-                if (audioBufferQueue.length >= 5) {
-                    handleCompleteSentence();
+                // 将Blob转换为ArrayBuffer
+                const arrayBuffer = await blob.arrayBuffer();
+                
+                // 直接处理PCM数据
+                try {
+                    const audioBuffer = await pcmToAudioBuffer(arrayBuffer);
+                    
+                    // 添加到适当的句子
+                    const sentenceId = header.sentence_id;
+                    if (sentenceId) {
+                        // 创建简化的块信息对象
+                        const chunkInfo = {
+                            chunk_number: header.chunk_number,
+                            is_first: header.is_first_chunk,
+                            sentence_id: sentenceId,
+                            session_id: header.session_id
+                        };
+                        
+                        // 如果是第一个块，记录并打印日志
+                        if (header.is_first_chunk) {
+                            console.log(`开始接收新的音频句子: 块 #${header.chunk_number}, 句子ID: ${sentenceId}`);
+                        }
+                        
+                        // 添加到句子中
+                        addAudioChunk(sentenceId, arrayBuffer, chunkInfo);
+                    } else {
+                        console.warn("收到二进制音频数据但没有关联的句子ID");
+                    }
+                } catch (decodeError) {
+                    console.error('音频解码错误:', decodeError);
+                    
+                    // 尝试直接播放原始PCM数据作为备用方案
+                    console.log('尝试直接播放原始PCM数据...');
+                    playRawPCM(arrayBuffer, header.is_first_chunk);
+                }
+            } catch (e) {
+                console.error('处理二进制音频数据出错:', e);
+            }
+        }
+        
+        // 直接播放原始PCM数据（备用方案）
+        function playRawPCM(pcmData, isFirst) {
+            if (!audioContext) {
+                initAudioContext();
+            }
+            
+            try {
+                // 转换PCM数据为16位整数数组
+                const int16Array = new Int16Array(pcmData);
+                
+                // 转换为浮点数数组
+                const floatArray = new Float32Array(int16Array.length);
+                for (let i = 0; i < int16Array.length; i++) {
+                    floatArray[i] = int16Array[i] / 32768.0;
+                }
+                
+                // 创建音频缓冲区
+                const buffer = audioContext.createBuffer(1, floatArray.length, 16000);
+                buffer.getChannelData(0).set(floatArray);
+                
+                // 播放
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioContext.destination);
+                
+                // 如果已经有正在播放的音频，停止它
+                if (isPlayingAudio && currentAudioSource) {
+                    try {
+                        currentAudioSource.stop();
+                    } catch (e) {
+                        console.warn('停止当前音频源时出错:', e);
+                    }
+                }
+                
+                // 记录当前音频源
+                currentAudioSource = source;
+                
+                // 设置播放结束处理
+                source.onended = () => {
+                    isPlayingAudio = false;
+                    currentAudioSource = null;
+                };
+                
+                // 开始播放
+                source.start(0);
+                isPlayingAudio = true;
+                console.log('直接播放PCM数据, 长度:', floatArray.length);
+                
+                return true;
+            } catch (e) {
+                console.error('直接播放PCM数据出错:', e);
+                return false;
+            }
+        }
+        
+        // 初始化句子
+        function initSentence(sentenceId, text, isFirst) {
+            console.log(`初始化句子: ${text}, ID: ${sentenceId}, 是否是第一个: ${isFirst}`);
+            
+            // 检查句子是否已存在
+            if (activeSentences.has(sentenceId)) {
+                console.warn(`句子 ${sentenceId} 已经存在，将被覆盖`);
+            }
+            
+            // 存储句子数据
+            activeSentences.set(sentenceId, {
+                id: sentenceId,
+                text: text,
+                isFirst: isFirst,
+                chunks: [],
+                isComplete: false,
+                startTime: Date.now()
+            });
+            
+            // 如果是第一个句子，设置为当前句子ID
+            if (isFirst) {
+                currentSentenceId = sentenceId;
+            }
+            
+            // 将句子添加到播放队列
+            sentencePlayQueue.push(sentenceId);
+            
+            // 尝试处理句子队列
+            processSentenceQueue();
+        }
+        
+        // 添加音频块到句子
+        function addAudioChunk(sentenceId, audioData, chunkInfo) {
+            // 获取句子数据
+            let sentence = activeSentences.get(sentenceId);
+            
+            // 如果句子不存在，创建新句子
+            if (!sentence) {
+                console.log(`为未知句子 ${sentenceId} 创建新句子条目`);
+                sentence = {
+                    id: sentenceId,
+                    text: chunkInfo.text || "",
+                    isFirst: chunkInfo.is_first || false,
+                    chunks: [],
+                    isComplete: false,
+                    startTime: Date.now()
+                };
+                activeSentences.set(sentenceId, sentence);
+                
+                // 将句子添加到播放队列
+                sentencePlayQueue.push(sentenceId);
+            }
+            
+            // 将音频块添加到句子
+            pcmToAudioBuffer(audioData).then(audioBuffer => {
+                sentence.chunks.push({
+                    buffer: audioBuffer,
+                    chunkNumber: chunkInfo.chunk_number || sentence.chunks.length + 1
+                });
+                
+                // 如果句子已经标记为完成并且在处理中，则处理该句子
+                if (sentence.isComplete && sentence.id === currentSentenceId && !isPlayingAudio) {
+                    processSentence(sentence.id);
                 }
             });
         }
         
-        // 处理完整的句子（或句子的一部分）
-        function handleCompleteSentence() {
-            if (audioBufferQueue.length === 0) return;
+        // 完成句子
+        function finalizeSentence(sentenceId) {
+            // 获取句子
+            let sentence = activeSentences.get(sentenceId);
             
-            // 将多个小缓冲区合并为一个
-            let totalLength = 0;
-            let firstChunk = audioBufferQueue[0]; // 获取第一个块的信息
+            if (sentence) {
+                console.log(`完成句子: ${sentence.text}, ID: ${sentenceId}, 共 ${sentence.chunks.length} 个块`);
+                
+                // 标记句子完成
+                sentence.isComplete = true;
+            } else {
+                console.warn(`尝试完成不存在的句子: ${sentenceId}`);
+            }
+            
+            // 尝试处理句子队列
+            processSentenceQueue();
+        }
+        
+        // 处理句子队列
+        function processSentenceQueue() {
+            // 如果正在处理或没有句子，则返回
+            if (isProcessingSentence || sentencePlayQueue.length === 0) {
+                return;
+            }
+            
+            // 尝试处理队列中的下一个句子
+            const nextSentenceId = sentencePlayQueue[0];
+            processSentence(nextSentenceId);
+        }
+        
+        // 处理单个句子
+        function processSentence(sentenceId) {
+            // 获取句子
+            const sentence = activeSentences.get(sentenceId);
+            
+            if (!sentence) {
+                console.warn(`尝试处理不存在的句子: ${sentenceId}`);
+                
+                // 移除此句子ID并处理下一个
+                sentencePlayQueue.shift();
+                processSentenceQueue();
+                return;
+            }
+            
+            // 标记正在处理
+            isProcessingSentence = true;
+            
+            console.log(`处理句子: ${sentence.text}, ID: ${sentenceId}, 状态: ${sentence.isComplete ? '完成' : '未完成'}, 块数: ${sentence.chunks.length}`);
+            
+            // 如果句子没有块或者还没完成且已处理超过100ms，则延迟处理
+            if (sentence.chunks.length === 0 || (!sentence.isComplete && Date.now() - sentence.startTime < 100)) {
+                console.log(`句子 ${sentenceId} 还没有音频块或刚刚开始，稍后处理`);
+                isProcessingSentence = false;
+                
+                // 50ms后再次尝试
+                setTimeout(() => {
+                    processSentenceQueue();
+                }, 50);
+                return;
+            }
+            
+            // 对块进行排序
+            sentence.chunks.sort((a, b) => a.chunkNumber - b.chunkNumber);
+            
+            // 合并音频块
+            mergeSentenceChunks(sentence).then(mergedBuffer => {
+                // 移除此句子ID
+                sentencePlayQueue.shift();
+                
+                // 播放合并后的音频
+                playAudioBuffer(mergedBuffer).then(() => {
+                    console.log(`句子 ${sentenceId} 播放完成`);
+                    
+                    // 如果已经完成并且有块，从活动句子中移除
+                    if (sentence.isComplete && sentence.chunks.length > 0) {
+                        activeSentences.delete(sentenceId);
+                    }
+                    
+                    // 标记处理完成
+                    isProcessingSentence = false;
+                    
+                    // 处理下一个句子
+                    processSentenceQueue();
+                }).catch(error => {
+                    console.error(`播放句子 ${sentenceId} 时出错:`, error);
+                    isProcessingSentence = false;
+                    processSentenceQueue();
+                });
+            }).catch(error => {
+                console.error(`合并句子 ${sentenceId} 的音频块时出错:`, error);
+                isProcessingSentence = false;
+                
+                // 移除此句子ID并处理下一个
+                sentencePlayQueue.shift();
+                processSentenceQueue();
+            });
+        }
+        
+        // 合并句子的音频块
+        async function mergeSentenceChunks(sentence) {
+            if (sentence.chunks.length === 0) {
+                throw new Error(`句子 ${sentence.id} 没有音频块`);
+            }
+            
+            // 如果只有一个块，直接返回
+            if (sentence.chunks.length === 1) {
+                return sentence.chunks[0].buffer;
+            }
             
             // 计算总长度
-            for (let item of audioBufferQueue) {
-                totalLength += item.buffer.length;
+            let totalLength = 0;
+            for (let chunk of sentence.chunks) {
+                totalLength += chunk.buffer.length;
             }
             
             // 创建合并后的缓冲区
@@ -686,102 +1113,73 @@
             
             // 复制数据
             let offset = 0;
-            for (let item of audioBufferQueue) {
-                const itemData = item.buffer.getChannelData(0);
+            for (let chunk of sentence.chunks) {
+                const itemData = chunk.buffer.getChannelData(0);
                 channelData.set(itemData, offset);
-                offset += item.buffer.length;
+                offset += chunk.buffer.length;
             }
             
-            // 将合并后的缓冲区添加到播放队列
-            playOrQueueBuffer(mergedBuffer, firstChunk.isFirst, firstChunk.text);
-            
-            // 清空缓冲区
+            return mergedBuffer;
+        }
+        
+        // 清空所有句子状态
+        function clearAllSentences() {
+            activeSentences.clear();
+            sentencePlayQueue = [];
             audioBufferQueue = [];
-        }
-        
-        // 播放旧版完整音频（为兼容保留）
-        function playLegacyAudio(pcmData, isFirst) {
-            // 确保音频上下文已初始化
-            if (!audioContext && !initAudioContext()) {
-                console.error("无法初始化音频上下文");
-                return false;
-            }
-            
-            // 确保音频上下文处于活动状态
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            
-            // 转换为AudioBuffer并播放
-            pcmToAudioBuffer(pcmData).then(audioBuffer => {
-                playOrQueueBuffer(audioBuffer, isFirst);
-            });
-        }
-        
-        // 播放或排队音频缓冲区
-        function playOrQueueBuffer(audioBuffer, isFirst, text) {
-            if (isFirst) {
-                console.log(`开始播放新的音频: ${text || "无文本"}`);
-            }
-            
-            if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
-                // 直接播放
-                playAudioBuffer(audioBuffer);
-            } else {
-                // 添加到队列
-                audioQueue.push(audioBuffer);
-            }
+            currentSentenceId = null;
+            isProcessingSentence = false;
         }
         
         // 播放音频缓冲区
-        function playAudioBuffer(audioBuffer) {
+        async function playAudioBuffer(audioBuffer) {
             if (!audioContext) {
                 console.error('Audio context not initialized');
-                return false;
+                return Promise.reject('Audio context not initialized');
             }
             
-            try {
-                // 创建音频源
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-                
-                // 保存当前播放的音频源以便可以停止
-                currentAudioSource = source;
-                
-                // 添加播放结束事件处理
-                source.onended = () => {
-                    console.log('Audio playback ended, queue length:', audioQueue.length);
-                    currentAudioSource = null;
-                    isPlayingAudio = false; // Reset playing flag
-                    playNextAudio();
-                };
-                
-                // 开始播放
-                source.start(0);
-                isPlayingAudio = true;
-                console.log('Started playing audio, buffer length:', audioBuffer.length);
-                
-                return true;
-            } catch (e) {
-                console.error('Error playing audio:', e);
-                isPlayingAudio = false;
-                return false;
-            }
-        }
-        
-        // 播放队列中的下一个音频
-        function playNextAudio() {
-            if (audioQueue.length > 0 && !isPlayingAudio) {
-                // 从队列中获取下一个音频
-                const nextAudio = audioQueue.shift();
-                console.log('Playing next audio from queue, remaining:', audioQueue.length);
-                
-                // 播放它
-                playAudioBuffer(nextAudio);
-            } else {
-                isPlayingAudio = false;
-            }
+            return new Promise((resolve, reject) => {
+                try {
+                    // 确保音频上下文处于活动状态
+                    if (audioContext.state === 'suspended') {
+                        audioContext.resume();
+                    }
+                    
+                    console.log(`准备播放音频缓冲区, 长度: ${audioBuffer.length}, 采样率: ${audioBuffer.sampleRate}Hz`);
+                    
+                    // 创建音频源
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    
+                    // 创建增益节点，用于控制音量
+                    const gainNode = audioContext.createGain();
+                    gainNode.gain.value = 1.0; // 确保音量是最大的
+                    
+                    // 连接：音频源 -> 增益节点 -> 输出设备
+                    source.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    // 保存当前播放的音频源以便可以停止
+                    currentAudioSource = source;
+                    
+                    // 添加播放结束事件处理
+                    source.onended = () => {
+                        console.log('Audio playback ended');
+                        currentAudioSource = null;
+                        isPlayingAudio = false;
+                        resolve();
+                    };
+                    
+                    // 开始播放
+                    source.start(0);
+                    isPlayingAudio = true;
+                    console.log('开始播放音频, 缓冲区长度:', audioBuffer.length);
+                } catch (e) {
+                    console.error('播放音频时出错:', e);
+                    isPlayingAudio = false;
+                    reject(e);
+                }
+            });
         }
         
         // 停止当前音频播放
@@ -799,6 +1197,16 @@
             audioQueue = [];
             audioBufferQueue = [];
             isPlayingAudio = false;
+            
+            // 清空所有句子状态
+            clearAllSentences();
+            
+            // 新增：如果AI正在响应，发送中断信号
+            if (isAIResponding && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "interrupt" }));
+                console.log("Interruption signal sent to server");
+                isAIResponding = false;
+            }
         }
         
         // Update status indicator
@@ -890,36 +1298,37 @@
             }
         }
         
-        // 处理二进制音频数据
-        async function handleBinaryAudioData(blob, header) {
-            try {
-                // 确保音频上下文已初始化
-                if (!audioContext) {
-                    initAudioContext();
-                }
-                
-                // 将Blob转换为ArrayBuffer
-                const arrayBuffer = await blob.arrayBuffer();
-                
-                // 处理音频块
-                const data = {
-                    type: 'tts_audio_chunk',
-                    is_chunk: true,
-                    chunk_number: header.chunk_number,
-                    is_first: header.is_first_chunk,
-                    sentence_id: header.sentence_id,
-                    session_id: header.session_id,
-                    rawAudio: arrayBuffer // 直接使用原始音频数据
-                };
-                
-                // 开始处理音频块
-                handleAudioChunk(arrayBuffer, data);
-                
-                if (header.is_first_chunk) {
-                    console.log(`开始播放新的二进制音频流: 块 #${header.chunk_number}`);
-                }
-            } catch (e) {
-                console.error('处理二进制音频数据出错:', e);
+        // 播放旧版完整音频（为兼容保留）
+        function playLegacyAudio(pcmData, isFirst) {
+            // 确保音频上下文已初始化
+            if (!audioContext && !initAudioContext()) {
+                console.error("无法初始化音频上下文");
+                return false;
+            }
+            
+            // 确保音频上下文处于活动状态
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            // 转换为AudioBuffer并播放
+            pcmToAudioBuffer(pcmData).then(audioBuffer => {
+                playOrQueueBuffer(audioBuffer, isFirst);
+            });
+        }
+        
+        // 播放或排队音频缓冲区
+        function playOrQueueBuffer(audioBuffer, isFirst, text) {
+            if (isFirst) {
+                console.log(`开始播放新的音频: ${text || "无文本"}`);
+            }
+            
+            if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
+                // 直接播放
+                playAudioBuffer(audioBuffer);
+            } else {
+                // 添加到队列
+                audioQueue.push(audioBuffer);
             }
         }
         
@@ -964,6 +1373,16 @@
                     
                     // 记录原始音频状态
                     logAudioState(inputData);
+                    
+                    // 新增：检测用户是否在AI响应时开始说话
+                    if (isAIResponding && isPlayingAudio) {
+                        // 检测是否有显著的声音输入
+                        const audioLevel = detectAudioLevel(inputData);
+                        if (audioLevel > 0.05) { // 可以调整这个阈值
+                            console.log("User started speaking while AI is responding. Interrupting...");
+                            stopAudioPlayback(); // 这将触发中断信号
+                        }
+                    }
                     
                     // 根据需要重采样
                     let audioToProcess = inputData;
@@ -1088,6 +1507,8 @@
             checkBrowserCompatibility();
             // Initialize WebSocket
             initializeWebSocket();
+            // 添加音频工具栏
+            addAudioToolbar();
         });
         
         // Handle page unload
@@ -1099,6 +1520,15 @@
                 socket.close();
             }
         });
+        
+        // 新增：检测音频电平的函数
+        function detectAudioLevel(audioBuffer) {
+            let sum = 0;
+            for (let i = 0; i < audioBuffer.length; i++) {
+                sum += Math.abs(audioBuffer[i]);
+            }
+            return sum / audioBuffer.length;
+        }
     </script>
 </body>
 </html> 
