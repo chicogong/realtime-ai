@@ -465,13 +465,16 @@
                 
                 // 添加播放结束事件处理
                 source.onended = () => {
+                    console.log('Audio playback ended, queue length:', audioQueue.length);
                     currentAudioSource = null;
+                    isPlayingAudio = false; // Reset playing flag
                     playNextAudio();
                 };
                 
                 // 开始播放
                 source.start(0);
                 isPlayingAudio = true;
+                console.log('Started playing audio');
                 
                 return true;
             } catch (e) {
@@ -494,6 +497,8 @@
                     await audioContext.resume();
                 }
                 
+                console.log('Queueing audio, isFirst:', isFirst, 'isPlaying:', isPlayingAudio, 'queueLength:', audioQueue.length);
+                
                 // 如果是第一个音频块或者我们需要立即播放
                 if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
                     // 直接播放
@@ -501,6 +506,7 @@
                 } else {
                     // 添加到队列等待播放
                     audioQueue.push(audioBuffer);
+                    console.log('Added to queue, new length:', audioQueue.length);
                 }
                 
                 return true;
@@ -512,9 +518,11 @@
         
         // 播放队列中的下一个音频
         function playNextAudio() {
+            console.log('playNextAudio called, queue length:', audioQueue.length, 'isPlaying:', isPlayingAudio);
             if (audioQueue.length > 0 && !isPlayingAudio) {
                 // 从队列中获取下一个音频
                 const nextAudio = audioQueue.shift();
+                console.log('Playing next audio from queue, remaining:', audioQueue.length);
                 
                 // 播放它
                 playAudioBuffer(nextAudio);

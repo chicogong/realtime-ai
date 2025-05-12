@@ -157,18 +157,18 @@ class AzureStreamingRecognizer:
             subscription=self.subscription_key, region=self.region)
         speech_config.speech_recognition_language = self.language
         
-        # Set streaming behavior options
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "Lexical"
-        )
+        # # Set streaming behavior options
+        # speech_config.set_property(
+        #     speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "Lexical"
+        # )
         
-        # Shorter silence timeouts for more responsive experience
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "2000"
-        )
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "800"
-        )
+        # # Shorter silence timeouts for more responsive experience
+        # speech_config.set_property(
+        #     speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "2000"
+        # )
+        # speech_config.set_property(
+        #     speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "800"
+        # )
         
         # Enable both dictation and conversation modes for best results with Chinese
         speech_config.enable_dictation()
@@ -550,7 +550,7 @@ async def process_with_llm(websocket, text, session_id):
                 response_stream = await openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=[
-                        {"role": "system", "content": "你是一个有用的中文助手。请回答用户的问题，给出简洁、友好的回应。"},
+                        {"role": "system", "content": "你是一个智能语音助手小蕊，请用口语化、简短的回答客户问题，不要回复任何表情符号"},
                         {"role": "user", "content": text}
                     ],
                     stream=True
