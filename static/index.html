@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure ASR & LLM 字幕演示</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f5f5f5;
+            height: 100vh;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .status-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .status {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .status.listening {
+            color: #2ecc71;
+        }
+        
+        .status.thinking {
+            color: #3498db;
+        }
+        
+        .status.error {
+            color: #e74c3c;
+        }
+        
+        .controls {
+            margin-bottom: 30px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background-color: #3498db;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        button.stop {
+            background-color: #e74c3c;
+        }
+        
+        button.stop:hover {
+            background-color: #c0392b;
+        }
+        
+        .subtitle-container {
+            width: 100%;
+            min-height: 120px;
+            border-radius: 8px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        
+        .partial-transcript {
+            font-size: 24px;
+            margin-bottom: 10px;
+            min-height: 36px;
+            color: #f1c40f;
+        }
+        
+        .final-transcript {
+            font-size: 16px;
+            color: #bdc3c7;
+            margin-top: 10px;
+            font-style: italic;
+        }
+        
+        .llm-response-container {
+            width: 100%;
+            min-height: 120px;
+            border-radius: 8px;
+            background-color: rgba(52, 73, 94, 0.9);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+            transition: opacity 0.3s;
+        }
+        
+        .llm-response {
+            font-size: 20px;
+            color: #ecf0f1;
+            line-height: 1.5;
+        }
+        
+        .llm-status {
+            font-size: 14px;
+            color: #bdc3c7;
+            margin-top: 10px;
+            font-style: italic;
+        }
+        
+        .history-container {
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .history-item {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .history-item-user {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            color: #2c3e50;
+        }
+        
+        .history-item-llm {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            color: #8e44ad;
+            padding-left: 15px;
+        }
+        
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-dot.listening {
+            background-color: #2ecc71;
+            box-shadow: 0 0 5px #2ecc71;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-dot.thinking {
+            background-color: #3498db;
+            box-shadow: 0 0 5px #3498db;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-dot.idle {
+            background-color: #95a5a6;
+        }
+        
+        .status-dot.error {
+            background-color: #e74c3c;
+        }
+
+        .browser-warning {
+            background-color: #ffeaa7;
+            border-left: 4px solid #fdcb6e;
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
+            display: none;
+        }
+        
+        .typing-indicator {
+            display: inline-block;
+        }
+        
+        .typing-indicator span {
+            height: 5px;
+            width: 5px;
+            margin-right: 3px;
+            border-radius: 50%;
+            background-color: #bdc3c7;
+            display: inline-block;
+            animation: typingPulse 1s infinite ease-in-out;
+        }
+        
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+            100% {
+                opacity: 1;
+            }
+        }
+        
+        @keyframes typingPulse {
+            0% {
+                transform: scale(1);
+                opacity: 0.5;
+            }
+            50% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Azure ASR & LLM 字幕演示</h1>
+        
+        <div id="browser-warning" class="browser-warning">
+            <strong>注意:</strong> 本应用需要使用支持音频API的现代浏览器，并且需要允许麦克风访问权限。请使用Chrome、Edge或Firefox的最新版本。
+        </div>
+        
+        <div class="status-container">
+            <div class="status">
+                <span class="status-dot idle" id="status-dot"></span>
+                <span id="status-text">准备就绪</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="start-btn">开始录音</button>
+            <button id="stop-btn" class="stop" disabled>停止录音</button>
+            <button id="reset-btn">重置</button>
+        </div>
+        
+        <div class="subtitle-container">
+            <div class="partial-transcript" id="partial-transcript"></div>
+            <div class="final-transcript" id="final-transcript"></div>
+        </div>
+        
+        <div class="llm-response-container">
+            <div class="llm-response" id="llm-response"></div>
+            <div class="llm-status" id="llm-status"></div>
+        </div>
+        
+        <div class="history-container" id="history-container">
+            <h3>对话历史</h3>
+            <div id="history"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Audio configuration
+        const SAMPLE_RATE = 16000;  // Azure需要16kHz采样率
+        const SAMPLE_SIZE = 16;
+        const CHANNELS = 1;
+        const BUFFER_SIZE = 4096;
+        
+        // WebSocket and recording variables
+        let socket = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let processor = null;
+        let isRecording = false;
+        
+        // 如果浏览器的音频采样率与目标不同，需要重采样
+        let resampleRequired = false;
+        let originalSampleRate = 0;
+        
+        // DOM elements
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const partialTranscript = document.getElementById('partial-transcript');
+        const finalTranscript = document.getElementById('final-transcript');
+        const llmResponse = document.getElementById('llm-response');
+        const llmStatus = document.getElementById('llm-status');
+        const history = document.getElementById('history');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const browserWarning = document.getElementById('browser-warning');
+        
+        // 音频播放相关变量
+        let audioQueue = [];
+        let isPlayingAudio = false;
+        let pendingAudioBuffer = null;
+        let currentAudioSource = null;
+        
+        // Check browser compatibility
+        function checkBrowserCompatibility() {
+            // Check if mediaDevices API is available
+            if (!navigator.mediaDevices) {
+                browserWarning.style.display = 'block';
+                browserWarning.innerHTML = '<strong>错误:</strong> 您的浏览器不支持音频录制功能。请使用最新版本的Chrome、Edge或Firefox浏览器。';
+                startBtn.disabled = true;
+                return false;
+            }
+            
+            // Check if getUserMedia is available
+            if (!navigator.mediaDevices.getUserMedia) {
+                browserWarning.style.display = 'block';
+                browserWarning.innerHTML = '<strong>错误:</strong> 您的浏览器不支持麦克风访问功能。请使用最新版本的Chrome、Edge或Firefox浏览器。';
+                startBtn.disabled = true;
+                return false;
+            }
+            
+            // Check if AudioContext is available
+            if (!window.AudioContext && !window.webkitAudioContext) {
+                browserWarning.style.display = 'block';
+                browserWarning.innerHTML = '<strong>错误:</strong> 您的浏览器不支持音频处理功能。请使用最新版本的Chrome、Edge或Firefox浏览器。';
+                startBtn.disabled = true;
+                return false;
+            }
+            
+            // Check if we're in a secure context (HTTPS or localhost)
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+                browserWarning.style.display = 'block';
+                browserWarning.innerHTML = '<strong>警告:</strong> 麦克风访问可能需要HTTPS连接。如果您遇到问题，请尝试使用HTTPS或在本地运行应用。';
+            }
+            
+            return true;
+        }
+        
+        // Initialize WebSocket connection
+        function initializeWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            if (socket && socket.readyState !== WebSocket.CLOSED) {
+                socket.close();
+            }
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function(event) {
+                console.log('WebSocket connected');
+                updateStatus('idle', '已连接，准备就绪');
+                startBtn.disabled = !checkBrowserCompatibility();
+            };
+            
+            socket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSocketMessage(data);
+                } catch (e) {
+                    console.error('Error parsing message:', e);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                console.log('WebSocket closed');
+                updateStatus('error', '连接已断开');
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                isRecording = false;
+            };
+            
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateStatus('error', '连接错误');
+            };
+        }
+        
+        // 初始化音频上下文
+        function initAudioContext() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                console.log(`Audio context initialized with sample rate: ${audioContext.sampleRate}Hz`);
+                return true;
+            } catch (e) {
+                console.error('Failed to initialize audio context:', e);
+                return false;
+            }
+        }
+        
+        // 将Base64编码的PCM数据解码为ArrayBuffer
+        function decodeBase64ToPCM(base64) {
+            const binaryString = window.atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+        
+        // 将PCM数据转换为AudioBuffer
+        async function pcmToAudioBuffer(pcmData) {
+            // 创建16位PCM AudioBuffer
+            const audioBuffer = audioContext.createBuffer(1, pcmData.byteLength / 2, 16000);
+            
+            // 获取音频通道数据
+            const channelData = audioBuffer.getChannelData(0);
+            
+            // 将PCM数据转换为Float32Array
+            const pcmInt16 = new Int16Array(pcmData);
+            for (let i = 0; i < pcmInt16.length; i++) {
+                // 将16位PCM值（-32768到32767）转换为-1.0到1.0范围的float
+                channelData[i] = pcmInt16[i] / 32768.0;
+            }
+            
+            return audioBuffer;
+        }
+        
+        // 播放音频缓冲区
+        function playAudioBuffer(audioBuffer) {
+            if (!audioContext) {
+                console.error('Audio context not initialized');
+                return false;
+            }
+            
+            try {
+                // 创建音频源
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                
+                // 保存当前播放的音频源以便可以停止
+                currentAudioSource = source;
+                
+                // 添加播放结束事件处理
+                source.onended = () => {
+                    currentAudioSource = null;
+                    playNextAudio();
+                };
+                
+                // 开始播放
+                source.start(0);
+                isPlayingAudio = true;
+                
+                return true;
+            } catch (e) {
+                console.error('Error playing audio:', e);
+                return false;
+            }
+        }
+        
+        // 将音频添加到队列并开始播放
+        async function queueAudio(base64PCM, isFirst) {
+            try {
+                // 解码音频数据
+                const pcmData = decodeBase64ToPCM(base64PCM);
+                
+                // 转换为AudioBuffer
+                const audioBuffer = await pcmToAudioBuffer(pcmData);
+                
+                // 恢复音频上下文（如果被暂停）
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                // 如果是第一个音频块或者我们需要立即播放
+                if (isFirst || (!isPlayingAudio && audioQueue.length === 0)) {
+                    // 直接播放
+                    playAudioBuffer(audioBuffer);
+                } else {
+                    // 添加到队列等待播放
+                    audioQueue.push(audioBuffer);
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('Error queuing audio:', e);
+                return false;
+            }
+        }
+        
+        // 播放队列中的下一个音频
+        function playNextAudio() {
+            if (audioQueue.length > 0 && !isPlayingAudio) {
+                // 从队列中获取下一个音频
+                const nextAudio = audioQueue.shift();
+                
+                // 播放它
+                playAudioBuffer(nextAudio);
+            } else {
+                isPlayingAudio = false;
+            }
+        }
+        
+        // 停止当前音频播放
+        function stopAudioPlayback() {
+            if (currentAudioSource) {
+                try {
+                    currentAudioSource.stop();
+                    currentAudioSource = null;
+                } catch (e) {
+                    console.error('Error stopping audio:', e);
+                }
+            }
+            
+            // 清空队列
+            audioQueue = [];
+            isPlayingAudio = false;
+        }
+        
+        // Handle WebSocket messages
+        function handleSocketMessage(data) {
+            switch (data.type) {
+                case 'partial_transcript':
+                    partialTranscript.textContent = data.content;
+                    break;
+                
+                case 'final_transcript':
+                    finalTranscript.textContent = data.content;
+                    // Add to history
+                    addToHistory(data.content, 'user');
+                    // Clear partial after a short delay
+                    setTimeout(() => {
+                        partialTranscript.textContent = '';
+                    }, 1000);
+                    break;
+                
+                case 'llm_status':
+                    if (data.status === 'processing') {
+                        updateStatus('thinking', 'AI思考中...');
+                        llmStatus.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div> AI思考中...';
+                        llmResponse.textContent = '';
+                        
+                        // 初始化音频上下文（如果尚未初始化）
+                        if (!audioContext) {
+                            initAudioContext();
+                        }
+                        
+                        // 停止所有正在播放的音频
+                        stopAudioPlayback();
+                    }
+                    break;
+                
+                case 'llm_response':
+                    // Show streaming response
+                    llmResponse.textContent = data.content;
+                    
+                    // If response is complete
+                    if (data.is_complete) {
+                        // Update status
+                        updateStatus('idle', '已完成');
+                        llmStatus.textContent = '回答已完成';
+                        
+                        // Add to history
+                        addToHistory(data.content, 'llm');
+                        
+                        // Clear status after delay
+                        setTimeout(() => {
+                            llmStatus.textContent = '';
+                        }, 2000);
+                    }
+                    break;
+                
+                case 'tts_audio':
+                    // 处理TTS音频数据
+                    queueAudio(data.audio, data.is_first)
+                        .then(success => {
+                            if (!success) {
+                                console.error('Failed to queue audio for playback');
+                            }
+                        });
+                    break;
+                
+                case 'status':
+                    if (data.status === 'listening') {
+                        updateStatus('listening', '正在听取...');
+                    } else if (data.status === 'stopped') {
+                        updateStatus('idle', '已停止');
+                    }
+                    break;
+                
+                case 'error':
+                    console.error('Server error:', data.message);
+                    updateStatus('error', `错误: ${data.message}`);
+                    llmStatus.textContent = data.message;
+                    break;
+                
+                default:
+                    console.log('Unhandled message type:', data.type, data);
+            }
+        }
+        
+        // Update status indicator
+        function updateStatus(state, message) {
+            statusDot.className = `status-dot ${state}`;
+            statusText.textContent = message;
+        }
+        
+        // Add message to history
+        function addToHistory(text, type) {
+            const item = document.createElement('div');
+            item.className = type === 'user' ? 'history-item-user' : 'history-item-llm';
+            
+            if (type === 'user') {
+                item.textContent = `👤 ${text}`;
+            } else {
+                item.textContent = `🤖 ${text}`;
+            }
+            
+            history.prepend(item);
+        }
+        
+        // 重采样函数 - 将任意采样率转换为16kHz
+        function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+            if (inputSampleRate === outputSampleRate) {
+                return buffer;
+            }
+            
+            const sampleRateRatio = inputSampleRate / outputSampleRate;
+            const newLength = Math.round(buffer.length / sampleRateRatio);
+            const result = new Float32Array(newLength);
+            
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            
+            while (offsetResult < result.length) {
+                const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                let accum = 0, count = 0;
+                
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+                
+                result[offsetResult] = accum / count;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+            
+            return result;
+        }
+        
+        // 从Float32转换为Int16 (PCM)
+        function convertFloat32ToInt16(buffer) {
+            const l = buffer.length;
+            const buf = new Int16Array(l);
+            
+            for (let i = 0; i < l; i++) {
+                // 转换为16位有符号整数
+                // 将-1到1的范围转换为-32768到32767
+                const s = Math.max(-1, Math.min(1, buffer[i]));
+                buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            
+            return buf;
+        }
+        
+        // 记录音频状态供诊断
+        function logAudioState(audioBuffer) {
+            // 每10秒记录一次音频状态
+            if (!logAudioState.lastLog || Date.now() - logAudioState.lastLog > 10000) {
+                // 分析音频幅度
+                let sum = 0, max = 0, min = 0;
+                for (let i = 0; i < audioBuffer.length; i++) {
+                    sum += Math.abs(audioBuffer[i]);
+                    max = Math.max(max, audioBuffer[i]);
+                    min = Math.min(min, audioBuffer[i]);
+                }
+                const avg = sum / audioBuffer.length;
+                
+                console.log(`音频状态: 平均幅度=${avg.toFixed(4)}, 范围=${min.toFixed(4)}到${max.toFixed(4)}, 采样率=${originalSampleRate}Hz${resampleRequired ? '(需要重采样)' : ''}`);
+                
+                // 检测麦克风可能的静音状态
+                if (avg < 0.0001 && max - min < 0.001) {
+                    console.warn("警告: 检测到可能的静音输入，请检查麦克风");
+                }
+                
+                logAudioState.lastLog = Date.now();
+            }
+        }
+        
+        // Start audio recording and streaming
+        async function startRecording() {
+            try {
+                // Check browser compatibility
+                if (!checkBrowserCompatibility()) {
+                    return;
+                }
+                
+                // Request microphone access with fallbacks for different browsers
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                
+                // Request microphone access
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+                
+                // Create audio context
+                audioContext = new AudioContext();
+                originalSampleRate = audioContext.sampleRate;
+                
+                // 检查是否需要重采样
+                resampleRequired = originalSampleRate !== SAMPLE_RATE;
+                console.log(`原始采样率: ${originalSampleRate}Hz, 目标采样率: ${SAMPLE_RATE}Hz, 需要重采样: ${resampleRequired}`);
+                
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                
+                // Create script processor node for streaming audio
+                processor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
+                
+                processor.onaudioprocess = function(e) {
+                    if (!isRecording || !socket || socket.readyState !== WebSocket.OPEN) return;
+                    
+                    // 获取音频数据
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    
+                    // 记录原始音频状态
+                    logAudioState(inputData);
+                    
+                    // 根据需要重采样
+                    let audioToProcess = inputData;
+                    if (resampleRequired) {
+                        audioToProcess = downsampleBuffer(inputData, originalSampleRate, SAMPLE_RATE);
+                    }
+                    
+                    // 转换为16位PCM
+                    const pcmData = convertFloat32ToInt16(audioToProcess);
+                    
+                    // 发送到服务器
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(pcmData.buffer);
+                    }
+                };
+                
+                // 连接音频节点
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                isRecording = true;
+                updateStatus('listening', '正在听取...');
+                
+                // Update UI
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                
+                // Send start command
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'start' }));
+                }
+                
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                
+                let errorMessage = '麦克风访问错误';
+                
+                if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+                    errorMessage = '找不到麦克风设备。请确认您的设备已正确连接。';
+                } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    errorMessage = '麦克风访问被拒绝。请在浏览器中允许麦克风访问权限。';
+                } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+                    errorMessage = '无法访问麦克风。可能被另一个应用程序占用。';
+                } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+                    errorMessage = '麦克风不符合要求的参数。';
+                } else if (error.name === 'TypeError') {
+                    errorMessage = '浏览器API错误。请尝试使用最新版本的Chrome、Edge或Firefox浏览器。';
+                }
+                
+                updateStatus('error', errorMessage);
+                browserWarning.style.display = 'block';
+                browserWarning.innerHTML = `<strong>错误:</strong> ${errorMessage}`;
+            }
+        }
+        
+        // Stop recording
+        function stopRecording() {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            
+            // Stop media stream tracks
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Disconnect audio nodes
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            
+            // Close audio context
+            if (audioContext) {
+                audioContext.close().catch(console.error);
+                audioContext = null;
+            }
+            
+            // Send stop command
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'stop' }));
+            }
+            
+            // Update UI
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            updateStatus('idle', '已停止');
+        }
+        
+        // Reset everything
+        function resetSession() {
+            // Stop recording if active
+            if (isRecording) {
+                stopRecording();
+            }
+            
+            // 停止所有正在播放的音频
+            stopAudioPlayback();
+            
+            // Clear displays
+            partialTranscript.textContent = '';
+            finalTranscript.textContent = '';
+            llmResponse.textContent = '';
+            llmStatus.textContent = '';
+            
+            // Send reset command
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "reset" }));
+            }
+            
+            updateStatus('idle', '已重置');
+        }
+        
+        // Event listeners
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+        resetBtn.addEventListener('click', resetSession);
+        
+        // Initialize connection when page loads
+        window.addEventListener('load', function() {
+            // Check browser compatibility first
+            checkBrowserCompatibility();
+            // Initialize WebSocket
+            initializeWebSocket();
+        });
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (isRecording) {
+                stopRecording();
+            }
+            if (socket) {
+                socket.close();
+            }
+        });
+    </script>
+</body>
+</html> 
