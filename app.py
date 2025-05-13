@@ -1362,6 +1362,25 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     
                     if cmd_type == "stop":
                         await recognizer.stop_continuous_recognition()
+                        
+                        # 停止所有TTS和LLM进程
+                        logger.info(f"停止命令接收，停止所有TTS和LLM进程，会话ID: {session_id}")
+                        
+                        # 获取会话状态
+                        session_state = session_states.get(session_id)
+                        if session_state:
+                            # 标记中断
+                            session_state.request_interrupt()
+                            
+                            # 中断TTS
+                            await SimpleAzureTTS.interrupt_session(session_id)
+                            
+                            # 通知客户端已完全停止
+                            await websocket.send_json({
+                                "type": "stop_acknowledged",
+                                "message": "所有处理已停止",
+                                "session_id": session_id
+                            })
                     elif cmd_type == "start":
                         await recognizer.start_continuous_recognition()
                     elif cmd_type == "reset":

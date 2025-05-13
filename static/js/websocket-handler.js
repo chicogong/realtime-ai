@@ -231,6 +231,13 @@ function handleSocketMessage(data, updateStatus) {
             updateStatus('listening', '已打断，正在听取...');
             isAIResponding = false;
             break;
+        
+        case 'stop_acknowledged':
+            console.log("收到停止确认:", data.message);
+            window.AudioProcessor.stopAudioPlayback();
+            updateStatus('idle', '已停止');
+            isAIResponding = false;
+            break;
     }
 }
 
