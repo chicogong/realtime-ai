@@ -238,7 +238,27 @@ const AudioProcessor = {
     async handleBinaryAudioData(blob) {
         try {
             const arrayBuffer = await blob.arrayBuffer();
-            this.playAudio(arrayBuffer);
+            
+            // 跳过12字节的头部信息 (请求ID 4字节 + 块序号 4字节 + 时间戳 4字节)
+            const headerSize = 12;
+            if (arrayBuffer.byteLength <= headerSize) {
+                console.warn('收到的音频数据过小，无法处理');
+                return;
+            }
+            
+            // 解析头部信息（可选，用于调试）
+            const headerView = new DataView(arrayBuffer, 0, headerSize);
+            const requestId = headerView.getUint32(0, true); // 小端序
+            const chunkNumber = headerView.getUint32(4, true);
+            const timestamp = headerView.getUint32(8, true);
+            
+            if (chunkNumber === 1) {
+                console.log(`收到音频: 请求ID=${requestId}, 块=${chunkNumber}, 时间戳=${timestamp}`);
+            }
+            
+            // 提取仅PCM音频数据
+            const audioData = arrayBuffer.slice(headerSize);
+            this.playAudio(audioData);
         } catch (e) {
             console.error('处理音频数据错误:', e);
         }
