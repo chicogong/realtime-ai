@@ -85,9 +85,53 @@ function handleSocketMessage(data, updateStatus) {
             if (partialTranscript) {
                 partialTranscript.textContent = data.content;
             }
+            
+            // 将中间识别结果显示在用户聊天气泡中
+            // 检查是否已有临时气泡
+            const existingTemp = document.getElementById('temp-user-bubble');
+            if (data.content.trim()) {
+                if (existingTemp) {
+                    // 更新已有的临时气泡
+                    existingTemp.textContent = data.content;
+                } else {
+                    // 创建一个临时的用户消息气泡
+                    const messages = document.getElementById('messages');
+                    if (messages) {
+                        // 创建消息包装容器
+                        const messageWrapper = document.createElement('div');
+                        messageWrapper.style.display = 'flex';
+                        messageWrapper.style.justifyContent = 'flex-end';
+                        messageWrapper.style.width = '100%';
+                        messageWrapper.id = 'temp-user-wrapper';
+                        
+                        // 创建消息元素
+                        const message = document.createElement('div');
+                        message.className = 'message user-message message-short temp-message';
+                        message.id = 'temp-user-bubble';
+                        message.textContent = data.content;
+                        
+                        // 应用淡色样式表示这是临时结果
+                        message.style.opacity = '0.7';
+                        
+                        // 组装元素
+                        messageWrapper.appendChild(message);
+                        messages.appendChild(messageWrapper);
+                        
+                        // 滚动到底部
+                        messages.scrollTop = messages.scrollHeight;
+                    }
+                }
+            }
             break;
         
         case 'final_transcript':
+            // 删除临时用户气泡
+            const tempBubble = document.getElementById('temp-user-bubble');
+            const tempWrapper = document.getElementById('temp-user-wrapper');
+            if (tempBubble && tempWrapper) {
+                tempWrapper.remove();
+            }
+            
             addMessage(data.content, 'user');
             if (partialTranscript) {
                 partialTranscript.textContent = '';
