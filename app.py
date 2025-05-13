@@ -425,6 +425,9 @@ class AzureStreamingRecognizer:
         # 只处理非空结果
         if text.strip() and self.websocket and self.loop:
             async def process_and_send_final():
+                # 首先停止任何正在进行的TTS响应
+                await stop_tts_and_clear_queues(self.websocket, self.session_id)
+                
                 # 发送最终识别结果
                 await self.websocket.send_json({
                     "type": "final_transcript",
@@ -486,6 +489,9 @@ class AzureStreamingRecognizer:
         if self.websocket and self.loop and self.last_partial_result.strip():
             async def send_final_from_partial():
                 logger.info(f"使用最后的部分结果作为最终结果: '{self.last_partial_result}'")
+                
+                # 首先停止任何正在进行的TTS响应
+                await stop_tts_and_clear_queues(self.websocket, self.session_id)
                 
                 # 发送最后的部分结果作为最终结果
                 await self.websocket.send_json({
@@ -1347,20 +1353,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             if voice_detector.has_continuous_voice():
                                 logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
                                 
-                                # 发送打断信令到客户端
-                                await websocket.send_json({
-                                    "type": "server_interrupt",
-                                    "message": "检测到新的语音输入，打断当前响应",
-                                    "session_id": session_id
-                                })
+                                # 停止所有TTS和清空队列
+                                await stop_tts_and_clear_queues(websocket, session_id)
                                 
-                                # 标记中断
-                                session_state.request_interrupt()
-                                
-                                # 中断TTS
-                                if await SimpleAzureTTS.interrupt_session(session_id):
-                                    # 重置语音检测器
-                                    voice_detector.reset()
+                                # 重置语音检测器
+                                voice_detector.reset()
                         
                         # 继续处理音频
                         recognizer.feed_audio(pcm_data)
@@ -1386,36 +1383,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         
                         # 获取会话状态
                         session_state = session_states.get(session_id)
+                        
+                        # 停止TTS和清空队列
+                        await stop_tts_and_clear_queues(websocket, session_id)
+                        
+                        # 处理额外的清空队列选项
                         if session_state:
-                            # 标记中断
-                            session_state.request_interrupt()
-                            
-                            # 中断TTS
-                            await SimpleAzureTTS.interrupt_session(session_id)
-                            
                             # 检查是否需要清空队列
                             clear_queues = message.get("clear_queues", False)
                             force_stop = message.get("force_stop", False)
-                            
-                            if clear_queues:
-                                logger.info(f"清空所有音频发送队列，会话ID: {session_id}")
-                                # 清空TTS处理器队列
-                                if session_state.tts_processor:
-                                    # 清空发送队列
-                                    while not session_state.tts_processor.send_queue.empty():
-                                        try:
-                                            session_state.tts_processor.send_queue.get_nowait()
-                                            session_state.tts_processor.send_queue.task_done()
-                                        except:
-                                            pass
-                                
-                                # 清空全局句子队列 
-                                while not SimpleAzureTTS.global_sentence_queue.empty():
-                                    try:
-                                        SimpleAzureTTS.global_sentence_queue.get_nowait()
-                                        SimpleAzureTTS.global_sentence_queue.task_done()
-                                    except:
-                                        pass
                             
                             if force_stop and session_state.is_tts_active:
                                 logger.info(f"强制停止所有TTS处理，会话ID: {session_id}")
@@ -1425,7 +1401,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             await websocket.send_json({
                                 "type": "stop_acknowledged",
                                 "message": "所有处理已停止",
-                                "queues_cleared": clear_queues,
+                                "queues_cleared": True,  # 现在总是清空队列
                                 "session_id": session_id
                             })
                     elif cmd_type == "start":
@@ -1557,6 +1533,46 @@ async def health_check() -> dict:
         "azure_speech_configured": bool(Config.AZURE_SPEECH_KEY and Config.AZURE_SPEECH_REGION),
         "openai_configured": bool(Config.OPENAI_API_KEY)
     }
+
+async def stop_tts_and_clear_queues(websocket: WebSocket, session_id: str) -> None:
+    """停止TTS响应并清空所有队列
+    
+    Args:
+        websocket: WebSocket连接
+        session_id: 会话ID
+    """
+    # 获取会话状态
+    session_state = session_states.get(session_id)
+    if session_state:
+        # 标记中断
+        session_state.request_interrupt()
+        
+        # 中断TTS
+        await SimpleAzureTTS.interrupt_session(session_id)
+        
+        # 清空TTS处理器队列
+        if session_state.tts_processor:
+            # 清空发送队列
+            while not session_state.tts_processor.send_queue.empty():
+                try:
+                    session_state.tts_processor.send_queue.get_nowait()
+                    session_state.tts_processor.send_queue.task_done()
+                except:
+                    pass
+        
+        # 清空全局句子队列
+        while not SimpleAzureTTS.global_sentence_queue.empty():
+            try:
+                SimpleAzureTTS.global_sentence_queue.get_nowait()
+                SimpleAzureTTS.global_sentence_queue.task_done()
+            except:
+                pass
+    
+    # 通知客户端停止任何音频播放
+    await websocket.send_json({
+        "type": "stop_audio",
+        "session_id": session_id
+    })
 
 if __name__ == "__main__":
     import uvicorn

@@ -93,6 +93,12 @@ const WebSocketHandler = {
                 console.log(`收到消息: ${data.type}`, data);
                 break;
                 
+            case 'stop_audio':
+                console.log('收到停止音频播放命令');
+                // 立即停止所有音频播放
+                window.AudioProcessor.stopAudioPlayback();
+                break;
+                
             case 'server_interrupt':
             case 'interrupt_acknowledged':
             case 'stop_acknowledged':
