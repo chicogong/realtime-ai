@@ -45,6 +45,9 @@ class Config:
     # 语音识别配置
     ASR_LANGUAGE = "zh-CN"
     VOICE_ENERGY_THRESHOLD = 0.05  # 语音能量阈值
+
+    # 调试配置
+    DEBUG = os.getenv("DEBUG", "false").lower() == "true"  # 默认关闭调试模式
     
     # 验证配置
     @classmethod
@@ -1319,40 +1322,55 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if "bytes" in data:
                 # 处理二进制音频数据
                 audio_data = data["bytes"]
-                if audio_data:
-                    # 进行简单验证
-                    if len(audio_data) < 2:  # 至少需要一个16位样本
-                        continue
+                if audio_data and len(audio_data) >= 10:  # 至少需要头部(8字节)加一个16位样本(2字节)
+                    try:
+                        # 解析头部信息
+                        # [4字节时间戳][4字节状态标志][PCM数据]
+                        header = audio_data[:8]
+                        timestamp = struct.unpack("<I", header[:4])[0]  # 小端序时间戳
+                        status_flags = struct.unpack("<I", header[4:8])[0]  # 小端序状态标志
                         
-                    # 检测是否有语音活动
-                    has_voice = voice_detector.detect(audio_data)
-                    
-                    # 检查是否有正在进行的TTS响应，如果有则发送打断信令
-                    session_state = session_states.get(session_id)
-                    if has_voice and session_state and (session_state.is_tts_active or session_state.is_processing_llm):
-                        # 只有当检测到显著的语音活动时才发送打断信令
-                        if voice_detector.has_continuous_voice():
-                            logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
-                            
-                            # 发送打断信令到客户端
-                            await websocket.send_json({
-                                "type": "server_interrupt",
-                                "message": "检测到新的语音输入，打断当前响应",
-                                "session_id": session_id
-                            })
-                            
-                            # 标记中断
-                            session_state.request_interrupt()
-                            
-                            # 中断TTS
-                            if await SimpleAzureTTS.interrupt_session(session_id):
-                                # 重置语音检测器
-                                voice_detector.reset()
-                    
-                    # 继续处理音频
-                    recognizer.feed_audio(audio_data)
+                        # 提取PCM数据部分
+                        pcm_data = audio_data[8:]
+                        
+                        # 日志记录传入音频块的信息（仅在调试模式下）
+                        if Config.DEBUG:
+                            logger.debug(f"接收音频: 时间戳={timestamp}, 状态={status_flags}, 大小={len(pcm_data)}字节")
+                        
+                        # 检测是否有语音活动
+                        has_voice = voice_detector.detect(pcm_data)
+                        
+                        # 检查是否有正在进行的TTS响应，如果有则发送打断信令
+                        session_state = session_states.get(session_id)
+                        if has_voice and session_state and (session_state.is_tts_active or session_state.is_processing_llm):
+                            # 只有当检测到显著的语音活动时才发送打断信令
+                            if voice_detector.has_continuous_voice():
+                                logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
+                                
+                                # 发送打断信令到客户端
+                                await websocket.send_json({
+                                    "type": "server_interrupt",
+                                    "message": "检测到新的语音输入，打断当前响应",
+                                    "session_id": session_id
+                                })
+                                
+                                # 标记中断
+                                session_state.request_interrupt()
+                                
+                                # 中断TTS
+                                if await SimpleAzureTTS.interrupt_session(session_id):
+                                    # 重置语音检测器
+                                    voice_detector.reset()
+                        
+                        # 继续处理音频
+                        recognizer.feed_audio(pcm_data)
+                    except Exception as e:
+                        logger.error(f"处理音频头部出错: {e}")
+                        # 如果头部解析失败，尝试直接处理原始数据
+                        if len(audio_data) > 2:
+                            recognizer.feed_audio(audio_data)
                 else:
-                    logger.warning("收到空音频数据")
+                    logger.warning("收到无效的音频数据: 数据为空或长度不足")
             
             elif "text" in data:
                 # 处理文本命令

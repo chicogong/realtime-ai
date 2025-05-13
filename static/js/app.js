@@ -8,6 +8,7 @@ let processor = null;
 let isRecording = false;
 let originalSampleRate = 0;
 let resampleRequired = false;
+let isFirstAudioBlock = true;
 
 // DOM元素
 const startBtn = document.getElementById('start-btn');
@@ -105,10 +106,50 @@ function processAudio(e) {
         );
     }
     
-    // 转换为16位PCM并发送
+    // 转换为16位PCM
     const pcmData = window.AudioProcessor.convertFloat32ToInt16(audioToProcess);
+    
+    // 创建带头部的数据缓冲区
+    // 头部格式: [4字节时间戳][4字节状态标志]
+    const headerSize = 8; // 8字节头部
+    const combinedBuffer = new ArrayBuffer(headerSize + pcmData.byteLength);
+    const headerView = new DataView(combinedBuffer, 0, headerSize);
+    
+    // 设置时间戳 (毫秒)
+    const timestamp = Date.now();
+    headerView.setUint32(0, timestamp, true); // 小端序
+    
+    // 设置状态标志
+    let statusFlags = 0;
+    
+    // 计算音频能量 (0-255)
+    const energy = Math.min(255, Math.floor(window.AudioProcessor.detectAudioLevel(inputData) * 1000));
+    statusFlags |= energy & 0xFF; // 使用低8位存储能量值
+    
+    // 可以设置其他标志位
+    // 麦克风静音状态 (位 8)
+    if (inputData.every(sample => Math.abs(sample) < 0.01)) {
+        statusFlags |= (1 << 8); // 静音标志
+    }
+    
+    // 首个音频块标记 (位 9)
+    // 这是一个示例，实际应用中需要跟踪首个块
+    if (isFirstAudioBlock) {
+        statusFlags |= (1 << 9);
+        isFirstAudioBlock = false;
+    }
+    
+    // 可以在这里设置其他标志位
+    
+    // 写入状态标志
+    headerView.setUint32(4, statusFlags, true); // 小端序
+    
+    // 拷贝PCM数据
+    new Uint8Array(combinedBuffer, headerSize).set(new Uint8Array(pcmData.buffer));
+    
+    // 发送带头部的数据
     if (window.WebSocketHandler.getSocket().readyState === WebSocket.OPEN) {
-        window.WebSocketHandler.getSocket().send(pcmData.buffer);
+        window.WebSocketHandler.getSocket().send(combinedBuffer);
     }
 }
 
@@ -119,6 +160,9 @@ function stopRecording() {
     if (!isRecording) return;
     
     isRecording = false;
+    
+    // 重置首个音频块标志，下次开始时是第一个
+    isFirstAudioBlock = true;
     
     // 停止媒体流
     if (mediaStream) {
@@ -160,6 +204,9 @@ function resetSession() {
     
     // 清空消息
     messages.innerHTML = '';
+    
+    // 重置首个音频块标志
+    isFirstAudioBlock = true;
     
     // 发送重置命令
     window.WebSocketHandler.sendCommand('reset');

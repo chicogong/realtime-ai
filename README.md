@@ -41,6 +41,43 @@
   头部：[4字节时间戳][4字节状态标志]
   ```
 
+**状态标志位定义**:
+- **位0-7**: 音频能量值（0-255）
+- **位8**: 麦克风静音状态（1=静音，0=活动）
+- **位9**: 首个音频块标记（1=是，0=否）
+- **位10**: 最后音频块标记（1=是，0=否）
+- **位11-31**: 保留供将来使用
+
+**状态标志位使用示例**:
+```javascript
+// 创建头部
+const headerView = new DataView(buffer, 0, 8);
+
+// 设置时间戳 (毫秒)
+const timestamp = Date.now();
+headerView.setUint32(0, timestamp, true); // 小端序
+
+// 状态标志
+let statusFlags = 0;
+
+// 计算音频能量 (0-255)
+const energy = Math.min(255, Math.floor(detectAudioLevel(audioData) * 1000));
+statusFlags |= energy & 0xFF; // 存储在低8位
+
+// 设置麦克风静音标志 (位 8)
+if (isAudioSilent(audioData)) {
+    statusFlags |= (1 << 8);
+}
+
+// 设置首个音频块标记 (位 9)
+if (isFirstBlock) {
+    statusFlags |= (1 << 9);
+}
+
+// 写入状态标志
+headerView.setUint32(4, statusFlags, true); // 小端序
+```
+
 #### 3.1.2 服务器到客户端（AI语音）
 - **音频格式**: 16位PCM
 - **采样率**: 24kHz
@@ -84,18 +121,37 @@
 
 | 消息类型 | 方向 | 格式 | 用途 |
 |---------|------|------|------|
-| `audio_data` | 服务器→客户端 | `{"type": "audio_data", "audio": "base64数据"}` | 传输AI合成的语音 |
-| `partial_transcript` | 服务器→客户端 | `{"type": "partial_transcript", "content": "文本"}` | 实时转录字幕(用户) |
-| `final_transcript` | 服务器→客户端 | `{"type": "final_transcript", "content": "文本"}` | 最终转录结果(用户) |
-| `partial_assistant_text` | 服务器→客户端 | `{"type": "partial_assistant_text", "content": "文本"}` | AI正在生成的文本(流式) |
-| `assistant_text` | 服务器→客户端 | `{"type": "assistant_text", "content": "文本"}` | AI的最终文本回复 |
-| `silence_state` | 服务器→客户端 | `{"type": "silence_state", "active": true/false}` | 沉默状态指示 |
-| `tts_start` | 客户端→服务器 | `{"type": "tts_start"}` | 通知服务器TTS开始播放 |
-| `tts_stop` | 客户端→服务器 | `{"type": "tts_stop"}` | 通知服务器TTS停止播放 |
+| `partial_transcript` | 服务器→客户端 | `{"type": "", "content": "文本partial_transcript", "session_id": "会话ID"}` | 实时转录字幕(用户) |
+| `final_transcript` | 服务器→客户端 | `{"type": "final_transcript", "content": "文本", "session_id": "会话ID"}` | 最终转录结果(用户) |
+| `llm_status` | 服务器→客户端 | `{"type": "llm_status", "status": "processing", "session_id": "会话ID"}` | LLM处理状态 |
+| `llm_response` | 服务器→客户端 | `{"type": "llm_response", "content": "文本", "is_complete": true/false, "session_id": "会话ID"}` | AI的文本回复 |
+| `tts_sentence_start` | 服务器→客户端 | `{"type": "tts_sentence_start", "sentence_id": "句子ID", "text": "文本", "is_first": true/false, "session_id": "会话ID"}` | TTS合成开始 |
+| `tts_sentence_end` | 服务器→客户端 | `{"type": "tts_sentence_end", "sentence_id": "句子ID", "text": "文本", "session_id": "会话ID"}` | TTS合成结束 |
+| `status` | 服务器→客户端 | `{"type": "status", "status": "listening/stopped", "session_id": "会话ID"}` | 系统状态更新 |
+| `error` | 服务器→客户端 | `{"type": "error", "message": "错误信息", "session_id": "会话ID"}` | 错误消息 |
+| `server_interrupt` | 服务器→客户端 | `{"type": "server_interrupt", "message": "打断信息", "session_id": "会话ID"}` | 服务器端打断通知 |
+| `stop` | 客户端→服务器 | `{"type": "stop"}` | 停止录音和处理 |
+| `start` | 客户端→服务器 | `{"type": "start"}` | 开始录音 |
 | `reset` | 客户端→服务器 | `{"type": "reset"}` | 重置对话状态 |
-| `speed_change` | 客户端→服务器 | `{"type": "speed_change", "value": 1.2}` | 调整TTS语速 |
+| `interrupt` | 客户端→服务器 | `{"type": "interrupt"}` | 客户端请求打断当前响应 |
 
-#### 3.3.2 转录字幕协议详情
+#### 3.3.2 二进制音频数据协议
+
+服务器通过WebSocket发送二进制PCM音频数据用于TTS输出：
+
+**音频数据格式**:
+```
+[4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
+```
+
+- **请求ID**: 唯一标识一个TTS请求
+- **块序号**: 当前音频块的序号，从0开始
+- **时间戳**: 毫秒级Unix时间戳
+- **PCM数据**: 原始16位PCM音频数据
+
+此格式允许客户端正确组装和播放流式音频数据，同时跟踪每个请求的进度。
+
+#### 3.3.3 转录字幕协议详情
 
 **部分转录消息(`partial_transcript`)**
 - 触发条件：语音识别引擎产生更新的部分转录
@@ -107,12 +163,12 @@
   {
     "type": "partial_transcript",
     "content": "今天天气真不",
-    "timestamp": 1684320012345
+    "session_id": "sess_12345abcde"
   }
   ```
 
 **最终转录消息(`final_transcript`)**
-- 触发条件：转向检测判断用户已完成当前输入
+- 触发条件：语音识别引擎确认最终结果
 - 行为：客户端将消息显示为完整的用户对话气泡
 - 特性：高准确度，代表最终确认的用户输入
 - 示例：
@@ -120,103 +176,34 @@
   {
     "type": "final_transcript", 
     "content": "今天天气真不错！",
-    "timestamp": 1684320015678,
-    "confidence": 0.98
+    "session_id": "sess_12345abcde"
   }
   ```
 
-#### 3.3.3 状态控制协议
+#### 3.3.4 打断机制
 
-**静音状态消息(`silence_state`)**
-- 用途：指示系统检测到的静音状态
-- 行为：客户端可使用此信息提供视觉反馈
-- 示例：
-  ```json
-  {
-    "type": "silence_state",
-    "active": true,
-    "duration": 1.5
-  }
-  ```
+系统支持双向打断机制，确保对话自然流畅：
 
-**对话控制消息**
-- 重置对话：
-  ```json
-  {"type": "reset"}
-  ```
-- 停止生成：
-  ```json
-  {"type": "abort_generation"}
-  ```
-- 状态查询：
-  ```json
-  {"type": "status_request"}
-  ```
-- 状态响应：
-  ```json
-  {
-    "type": "status_response",
-    "stt_active": true,
-    "llm_processing": false,
-    "tts_active": false,
-    "silence_detected": true,
-    "session_duration": 145.3
-  }
-  ```
+**服务器检测到用户打断**:
+1. 当用户在AI响应播放过程中开始说话
+2. 服务器通过语音活动检测器识别显著的语音输入
+3. 发送`server_interrupt`消息通知客户端
+4. 停止当前的TTS和LLM处理
 
-#### 3.3.4 错误处理协议
+**客户端主动打断**:
+1. 用户点击界面上的打断按钮
+2. 客户端发送`interrupt`消息
+3. 服务器停止当前TTS和LLM处理
+4. 服务器回复`interrupt_acknowledged`确认
 
-**错误消息**
-- 格式：
-  ```json
-  {
-    "type": "error",
-    "code": 1001,
-    "message": "语音识别引擎初始化失败",
-    "component": "stt",
-    "recoverable": true
-  }
-  ```
+#### 3.3.5 会话管理
 
-**错误代码范围**
-- 1000-1099: 连接与会话错误
-- 1100-1199: 语音识别错误
-- 1200-1299: LLM处理错误
-- 1300-1399: TTS合成错误
-- 1400-1499: 资源限制错误
+系统使用唯一会话ID管理用户对话状态：
 
-#### 3.3.5 会话管理协议
-
-**会话初始化**
-- 服务器在WebSocket连接建立后发送：
-  ```json
-  {
-    "type": "session_init",
-    "session_id": "sess_12345abcde",
-    "capabilities": {
-      "stt_models": ["base.en", "large"],
-      "tts_engines": ["coqui", "kokoro", "orpheus"],
-      "languages": ["en", "zh", "es"]
-    },
-    "default_settings": {
-      "language": "en",
-      "tts_engine": "coqui",
-      "tts_speed": 1.0
-    }
-  }
-  ```
-
-**配置更改**
-- 客户端请求更改配置：
-  ```json
-  {
-    "type": "config_change",
-    "settings": {
-      "language": "zh",
-      "tts_engine": "kokoro"
-    }
-  }
-  ```
+- 每个WebSocket连接创建一个新会话
+- 会话ID包含在所有消息中，确保正确路由
+- 支持超时清理不活跃会话（默认10分钟）
+- 会话状态包括：正在处理的LLM请求、TTS活动状态、是否请求中断等
 
 ## 4. 核心功能实现
 
