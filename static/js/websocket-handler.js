@@ -77,24 +77,20 @@ function initializeWebSocket(updateStatus, startBtn) {
  */
 function handleSocketMessage(data, updateStatus) {
     // 使用DOM选择器直接获取元素而不是使用全局变量
-    const partialTranscript = document.getElementById('partial-transcript');
     const messages = document.getElementById('messages');
 
     switch (data.type) {
         case 'partial_transcript':
-            if (partialTranscript) {
-                partialTranscript.textContent = data.content;
-            }
-            
-            // 将中间识别结果显示在用户聊天气泡中
-            // 检查是否已有临时气泡
-            const existingTemp = document.getElementById('temp-user-bubble');
+            // 获取当前的部分识别结果
             if (data.content.trim()) {
-                if (existingTemp) {
-                    // 更新已有的临时气泡
-                    existingTemp.textContent = data.content;
+                // 检查是否已有当前用户气泡
+                const userBubble = document.getElementById('current-user-bubble');
+                
+                if (userBubble) {
+                    // 更新现有气泡内容
+                    userBubble.textContent = data.content;
                 } else {
-                    // 创建一个临时的用户消息气泡
+                    // 创建新的用户消息气泡
                     const messages = document.getElementById('messages');
                     if (messages) {
                         // 创建消息包装容器
@@ -102,16 +98,13 @@ function handleSocketMessage(data, updateStatus) {
                         messageWrapper.style.display = 'flex';
                         messageWrapper.style.justifyContent = 'flex-end';
                         messageWrapper.style.width = '100%';
-                        messageWrapper.id = 'temp-user-wrapper';
+                        messageWrapper.id = 'current-user-wrapper';
                         
                         // 创建消息元素
                         const message = document.createElement('div');
-                        message.className = 'message user-message message-short temp-message';
-                        message.id = 'temp-user-bubble';
+                        message.className = 'message user-message message-short';
+                        message.id = 'current-user-bubble';
                         message.textContent = data.content;
-                        
-                        // 应用淡色样式表示这是临时结果
-                        message.style.opacity = '0.7';
                         
                         // 组装元素
                         messageWrapper.appendChild(message);
@@ -125,16 +118,20 @@ function handleSocketMessage(data, updateStatus) {
             break;
         
         case 'final_transcript':
-            // 删除临时用户气泡
-            const tempBubble = document.getElementById('temp-user-bubble');
-            const tempWrapper = document.getElementById('temp-user-wrapper');
-            if (tempBubble && tempWrapper) {
-                tempWrapper.remove();
-            }
+            // 获取并更新当前用户气泡
+            const userBubble = document.getElementById('current-user-bubble');
+            const userWrapper = document.getElementById('current-user-wrapper');
             
-            addMessage(data.content, 'user');
-            if (partialTranscript) {
-                partialTranscript.textContent = '';
+            if (userBubble && userWrapper) {
+                // 更新内容
+                userBubble.textContent = data.content;
+                
+                // 移除ID以便下一次创建新气泡
+                userBubble.id = '';
+                userWrapper.id = '';
+            } else {
+                // 如果没有现有气泡，直接添加新消息
+                addMessage(data.content, 'user');
             }
             break;
         
