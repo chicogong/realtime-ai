@@ -15,9 +15,8 @@ import struct
 import openai
 import async_timeout
 from openai import AsyncOpenAI
-import base64
-from collections import deque
 import httpx
+from collections import deque
 
 # Load environment variables
 load_dotenv()
@@ -614,10 +613,18 @@ class SimpleAzureTTS:
             await self.send_queue.put((0, sentence_start))
             
             try:
+                # 低级别验证SSML
+                if len(text) < 1 or len(text) > 1000:
+                    logger.warning(f"文本长度异常: {len(text)}字符")
+                    
+                # 使用较短的超时时间
+                timeout = httpx.Timeout(10.0, connect=5.0)
+                
                 async with http_client.stream("POST", 
                                           self.endpoint, 
                                           headers=headers, 
-                                          content=ssml) as response:
+                                          content=ssml,
+                                          timeout=timeout) as response:
                     if response.status_code != 200:
                         logger.error(f"TTS请求失败，状态码: {response.status_code}")
                         error_text = await response.aread()
@@ -632,24 +639,75 @@ class SimpleAzureTTS:
                         await self.send_queue.put((999999, error_msg))  # 高优先级
                         return
                     
+                    # 收集所有块并批量处理
+                    chunks = []
+                    
                     # 逐块处理流式响应并加入发送队列
                     async for chunk in response.aiter_bytes(chunk_size=4096):  # 使用更小的块大小
                         if chunk:
-                            chunk_count += 1
+                            chunks.append(chunk)
                             total_bytes += len(chunk)
-                            
-                            # 创建音频块消息（使用二进制格式而非base64编码）
-                            audio_msg = {
-                                "type": "tts_audio_binary",
-                                "sentence_id": sentence_id,
-                                "binary_data": chunk,  # 这个字段将被特殊处理发送为二进制
-                                "chunk_number": chunk_count,
-                                "is_first_chunk": chunk_count == 1 and is_first,
-                                "session_id": session_id
-                            }
-                            
-                            # 将音频块消息放入队列（使用chunk_count作为优先级确保顺序）
-                            await self.send_queue.put((chunk_count, audio_msg))
+                    
+                    # 检查是否有内容
+                    if not chunks:
+                        logger.warning(f"TTS响应没有返回音频数据: '{text}'")
+                        # 发送空的结束标记以便客户端继续
+                        await self.send_queue.put((1, {
+                            "type": "tts_sentence_end",
+                            "sentence_id": sentence_id,
+                            "text": text,
+                            "session_id": session_id,
+                            "empty_response": True
+                        }))
+                        return
+                    
+                    # 检查会话是否已中断
+                    session_state = session_states.get(session_id)
+                    if session_state and session_state.is_interrupted():
+                        logger.info(f"会话已中断，放弃发送TTS数据: '{text}'")
+                        return
+                    
+                    # 依次处理所有数据块
+                    for i, chunk in enumerate(chunks):
+                        chunk_count = i + 1
+                        
+                        # 创建音频块消息（使用二进制格式）
+                        audio_msg = {
+                            "type": "tts_audio_binary",
+                            "sentence_id": sentence_id,
+                            "binary_data": chunk,  # 这个字段将被特殊处理发送为二进制
+                            "chunk_number": chunk_count,
+                            "is_first_chunk": chunk_count == 1 and is_first,
+                            "total_chunks": len(chunks),
+                            "session_id": session_id
+                        }
+                        
+                        # 将音频块消息放入队列（使用chunk_count作为优先级确保顺序）
+                        await self.send_queue.put((chunk_count, audio_msg))
+                        
+                        # 每隔一些块检查中断状态
+                        if chunk_count % 5 == 0:
+                            if session_state and session_state.is_interrupted():
+                                logger.info(f"检测到中断，停止发送剩余TTS块")
+                                break
+                    
+                    # 记录性能
+                    duration = time.time() - start_time
+                    logger.info(f"TTS流式合成完成，耗时: {duration:.2f}秒，共{chunk_count}个块，总大小: {total_bytes} 字节")
+                    
+                    # 只有在不中断的情况下发送结束标记
+                    if not (session_state and session_state.is_interrupted()):
+                        # 发送流式结束标记
+                        sentence_end = {
+                            "type": "tts_sentence_end",
+                            "sentence_id": sentence_id,
+                            "text": text,
+                            "session_id": session_id
+                        }
+                        
+                        # 放入队列，确保最后处理
+                        await self.send_queue.put((chunk_count + 1, sentence_end))
+                
             except httpx.ReadTimeout:
                 logger.warning(f"TTS请求超时: '{text}'")
                 await self.send_queue.put((999999, {
@@ -668,21 +726,6 @@ class SimpleAzureTTS:
                     "session_id": session_id
                 }))
                 return
-            
-            # 记录性能
-            duration = time.time() - start_time
-            logger.info(f"TTS流式合成完成，耗时: {duration:.2f}秒，共{chunk_count}个块，总大小: {total_bytes} 字节")
-            
-            # 发送流式结束标记
-            sentence_end = {
-                "type": "tts_sentence_end",
-                "sentence_id": sentence_id,
-                "text": text,
-                "session_id": session_id
-            }
-            
-            # 放入队列，确保最后处理
-            await self.send_queue.put((chunk_count + 1, sentence_end))
             
             # 等待发送队列处理完此句子的所有数据
             if self.send_queue.qsize() > 0:
@@ -766,20 +809,41 @@ class SimpleAzureTTS:
                             # 二进制数据需要特殊处理
                             binary_data = message.pop("binary_data")
                             
-                            # 先发送消息头部
-                            await websocket.send_json({
-                                "type": "tts_binary_header",
-                                "sentence_id": message["sentence_id"],
-                                "chunk_number": message["chunk_number"],
-                                "is_first_chunk": message["is_first_chunk"],
-                                "session_id": message["session_id"]
-                            })
+                            # 确保数据有效
+                            if not binary_data or len(binary_data) == 0:
+                                logger.warning(f"跳过空的音频数据块: {message.get('chunk_number')}")
+                                continue
                             
-                            # 再发送二进制数据
-                            await websocket.send_bytes(binary_data)
+                            try:
+                                # 创建包含元数据的二进制头部
+                                # 格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
+                                import struct
+                                import time
+                                
+                                # 生成唯一请求ID (使用句子ID的哈希值)
+                                request_id = hash(message["sentence_id"]) & 0xFFFFFFFF  # 取32位正整数
+                                chunk_number = message["chunk_number"]
+                                timestamp = int(time.time() * 1000) & 0xFFFFFFFF  # 毫秒时间戳
+                                
+                                # 创建头部
+                                header = struct.pack("<III", request_id, chunk_number, timestamp)
+                                
+                                # 合并头部和PCM数据
+                                combined_data = header + binary_data
+                                
+                                # 直接发送合并后的二进制数据
+                                await websocket.send_bytes(combined_data)
+                                
+                                # 如果是第一个块，记录日志
+                                if message.get("is_first_chunk", False):
+                                    logger.info(f"发送首个音频块，ID: {request_id}, 块号: {chunk_number}, 大小: {len(binary_data)} 字节")
+                            except Exception as e:
+                                logger.error(f"发送音频数据出错: {e}")
                         else:
-                            # 普通JSON消息
-                            await websocket.send_json(message)
+                            # 发送普通JSON消息 (除了二进制音频数据外的消息)
+                            # 不再发送tts_binary_header，因为头部已经合并到二进制数据中
+                            if message["type"] != "tts_binary_header":
+                                await websocket.send_json(message)
                     
                     # 清空已处理消息
                     pending_msgs = []
@@ -1021,15 +1085,26 @@ class VoiceActivityDetector:
             self.reset()
             
         try:
-            # 计算音频能量
-            if len(audio_chunk) >= 20:  # 至少需要10个样本点
-                pcm_samples = struct.unpack(f"<{len(audio_chunk)//2}h", audio_chunk[:100])
+            # 计算音频能量 - 使用安全的方法处理任意大小的缓冲区
+            try:
+                # 确保只处理缓冲区的可用部分
+                max_samples = min(50, len(audio_chunk) // 2)  # 最多处理50个样本
+                if max_samples <= 0:
+                    return False
+                
+                # 创建合适大小的Int16Array
+                pcm_samples = []
+                for i in range(max_samples):
+                    if i*2+1 < len(audio_chunk):
+                        # 手动解析2字节为一个16位整数
+                        value = int.from_bytes(audio_chunk[i*2:i*2+2], byteorder='little', signed=True)
+                        pcm_samples.append(value)
+                
+                if not pcm_samples:
+                    return False
                 
                 # 计算平均能量
-                energy = 0
-                for sample in pcm_samples:
-                    energy += abs(sample)
-                energy = energy / len(pcm_samples)
+                energy = sum(abs(sample) for sample in pcm_samples) / len(pcm_samples)
                 
                 # 归一化能量值 (16位PCM范围是-32768到32767)
                 normalized_energy = energy / 32768.0
@@ -1038,8 +1113,11 @@ class VoiceActivityDetector:
                 if normalized_energy > self.energy_threshold:
                     self.voice_frames += 1
                     return True
+            except Exception as e:
+                logger.debug(f"语音采样处理错误: {e}")
+                return False
         except Exception as e:
-            logger.warning(f"语音检测错误: {e}")
+            logger.debug(f"语音检测错误: {e}")
             
         return False
         
@@ -1084,6 +1162,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Process binary audio data
                 audio_data = data["bytes"]
                 if audio_data:
+                    # 先进行简单的验证
+                    if len(audio_data) < 2:  # 至少需要一个16位样本
+                        continue
+                        
                     # 检测是否有语音活动
                     has_voice = voice_detector.detect(audio_data)
                     
