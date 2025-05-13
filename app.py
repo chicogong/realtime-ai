@@ -297,13 +297,6 @@ class AzureStreamingRecognizer:
     """Azure流式语音识别处理器"""
     
     def __init__(self, subscription_key: str, region: str, language: str = Config.ASR_LANGUAGE):
-        """初始化Azure语音识别器
-        
-        Args:
-            subscription_key: Azure语音服务订阅密钥
-            region: Azure语音服务区域
-            language: 识别的语言代码
-        """
         self.subscription_key = subscription_key
         self.region = region
         self.language = language
@@ -332,12 +325,9 @@ class AzureStreamingRecognizer:
                 region=self.region
             )
             speech_config.speech_recognition_language = self.language
-            
-            # 启用听写模式以获得更好的结果
             speech_config.enable_dictation()
             
-            # 记录音频格式信息
-            logger.info(f"Azure期望的音频格式: 16位PCM，16kHz，单声道")
+            logger.info("Azure期望的音频格式: 16位PCM，16kHz，单声道")
             
             # 创建流式识别器
             self.recognizer = speechsdk.SpeechRecognizer(
@@ -351,12 +341,7 @@ class AzureStreamingRecognizer:
             raise
     
     def set_websocket(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop) -> None:
-        """设置WebSocket连接和事件循环
-        
-        Args:
-            websocket: 连接到客户端的WebSocket对象
-            loop: 异步事件循环
-        """
+        """设置WebSocket连接和事件循环"""
         self.websocket = websocket
         self.loop = loop
     
@@ -378,23 +363,16 @@ class AzureStreamingRecognizer:
         self.recognizer.speech_end_detected.connect(self._on_speech_end_detected)
     
     def _on_session_started(self, evt) -> None:
-        """处理会话开始事件"""
         logger.info(f"语音识别会话已开始: {evt}")
     
     def _on_speech_start_detected(self, evt) -> None:
-        """处理语音开始检测"""
         logger.info("检测到语音开始")
     
     def _on_speech_end_detected(self, evt) -> None:
-        """处理语音结束检测"""
         logger.info("检测到语音结束")
     
     def _on_recognizing(self, evt) -> None:
-        """处理部分识别结果
-        
-        Args:
-            evt: 识别事件对象
-        """
+        """处理部分识别结果"""
         text = evt.result.text
         logger.info(f"部分识别: '{text}'")
         
@@ -414,11 +392,7 @@ class AzureStreamingRecognizer:
             asyncio.run_coroutine_threadsafe(send_partial(), self.loop)
     
     def _on_recognized(self, evt) -> None:
-        """处理最终识别结果
-        
-        Args:
-            evt: 识别事件对象
-        """
+        """处理最终识别结果"""
         text = evt.result.text
         logger.info(f"最终识别: '{text}'")
         
@@ -447,11 +421,7 @@ class AzureStreamingRecognizer:
             logger.info("识别结果为空，未检测到文本")
     
     def _on_canceled(self, evt) -> None:
-        """处理取消和错误
-        
-        Args:
-            evt: 取消事件对象
-        """
+        """处理取消和错误"""
         logger.error(f"识别已取消: {evt.result.reason}")
         
         if evt.result.reason == speechsdk.CancellationReason.Error:
@@ -478,11 +448,7 @@ class AzureStreamingRecognizer:
         self.is_recognizing = False
     
     def _on_session_stopped(self, evt) -> None:
-        """处理会话停止事件
-        
-        Args:
-            evt: 会话停止事件
-        """
+        """处理会话停止事件"""
         logger.info("语音识别会话已停止")
         
         # 如果有部分结果但没有生成最终结果，则使用部分结果作为最终结果
@@ -522,11 +488,7 @@ class AzureStreamingRecognizer:
         self.is_recognizing = False
     
     def feed_audio(self, audio_chunk: bytes) -> None:
-        """处理传入的PCM音频块
-        
-        Args:
-            audio_chunk: PCM音频数据
-        """
+        """处理传入的PCM音频块"""
         if not audio_chunk or len(audio_chunk) == 0:
             logger.warning("收到空音频块")
             return
@@ -622,23 +584,13 @@ class SimpleAzureTTS:
     
     @classmethod
     async def get_http_client(cls) -> httpx.AsyncClient:
-        """获取或创建共享HTTP客户端
-        
-        Returns:
-            HTTP客户端实例
-        """
+        """获取或创建共享HTTP客户端"""
         if cls._http_client is None or cls._http_client.is_closed:
             cls._http_client = httpx.AsyncClient(timeout=30.0)
         return cls._http_client
     
     def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE):
-        """初始化TTS处理器
-        
-        Args:
-            subscription_key: Azure语音服务订阅密钥
-            region: Azure语音服务区域
-            voice_name: TTS声音名称
-        """
+        """初始化TTS处理器"""
         self.subscription_key = subscription_key
         self.region = region
         self.voice_name = voice_name
@@ -660,11 +612,7 @@ class SimpleAzureTTS:
         logger.info(f"中国区TTS已初始化，使用声音: {voice_name}，终端: {self.endpoint}")
     
     def set_session_id(self, session_id: str) -> None:
-        """设置此TTS处理器的会话ID
-        
-        Args:
-            session_id: 会话唯一标识符
-        """
+        """设置此TTS处理器的会话ID"""
         self.session_id = session_id
     
     @classmethod
@@ -715,14 +663,7 @@ class SimpleAzureTTS:
     
     @classmethod
     async def interrupt_session(cls, session_id: str) -> bool:
-        """中断特定会话的所有TTS任务
-        
-        Args:
-            session_id: 要中断的会话ID
-            
-        Returns:
-            如果有任务被中断，返回True
-        """
+        """中断特定会话的所有TTS任务"""
         logger.info(f"正在中断会话 {session_id} 的TTS任务")
         
         # 遍历所有活动任务，取消与此会话相关的任务
@@ -737,14 +678,7 @@ class SimpleAzureTTS:
         return interrupted_tasks > 0
     
     async def synthesize_text_stream(self, text: str, websocket: WebSocket, session_id: str, is_first: bool = False) -> None:
-        """将文本流式合成为PCM音频并直接发送到客户端
-        
-        Args:
-            text: 要合成的文本
-            websocket: WebSocket连接
-            session_id: 会话ID
-            is_first: 是否是第一个句子
-        """
+        """将文本流式合成为PCM音频并直接发送到客户端"""
         if not text or not text.strip():
             logger.warning("TTS收到空文本")
             return
@@ -775,14 +709,7 @@ class SimpleAzureTTS:
         logger.info(f"已将句子添加到队列: '{text}'")
     
     async def _process_single_sentence(self, text: str, websocket: WebSocket, session_id: str, is_first: bool) -> None:
-        """处理单个句子的TTS合成
-        
-        Args:
-            text: 要合成的文本
-            websocket: WebSocket连接
-            session_id: 会话ID
-            is_first: 是否是第一个句子
-        """
+        """处理单个句子的TTS合成"""
         logger.info(f"正在流式合成文本: '{text}'")
         
         # 获取HTTP客户端
@@ -991,11 +918,7 @@ class SimpleAzureTTS:
                 pass
     
     async def _process_send_queue(self, websocket: WebSocket) -> None:
-        """处理发送队列中的消息
-        
-        Args:
-            websocket: WebSocket连接
-        """
+        """处理发送队列中的消息"""
         self.is_processing = True
         pending_msgs = []
         
@@ -1079,15 +1002,9 @@ class SimpleAzureTTS:
         finally:
             self.is_processing = False
 
+# 辅助函数
 def split_into_sentences(text: str) -> List[str]:
-    """将文本分成句子
-    
-    Args:
-        text: 输入文本
-        
-    Returns:
-        句子列表
-    """
+    """将文本分成句子"""
     # 匹配中文和英文常见的句子终止符
     sentence_ends = r'(?<=[。！？.!?;；:：])\s*'
     sentences = re.split(sentence_ends, text)
@@ -1095,13 +1012,7 @@ def split_into_sentences(text: str) -> List[str]:
     return [s.strip() for s in sentences if s.strip()]
 
 async def process_with_llm(websocket: WebSocket, text: str, session_id: str) -> None:
-    """使用LLM处理文本，将回复流式转换为语音并发送
-    
-    Args:
-        websocket: WebSocket连接
-        text: 用户输入文本
-        session_id: 会话ID
-    """
+    """使用LLM处理文本，将回复流式转换为语音并发送"""
     tts_processor = None
     
     # 获取或创建会话状态
@@ -1286,15 +1197,44 @@ async def process_with_llm(websocket: WebSocket, text: str, session_id: str) -> 
         session_state.is_tts_active = False
         session_state.response_stream = None
 
+async def stop_tts_and_clear_queues(websocket: WebSocket, session_id: str) -> None:
+    """停止TTS响应并清空所有队列"""
+    # 获取会话状态
+    session_state = session_states.get(session_id)
+    if session_state:
+        # 标记中断
+        session_state.request_interrupt()
+        
+        # 中断TTS
+        await SimpleAzureTTS.interrupt_session(session_id)
+        
+        # 清空TTS处理器队列
+        if session_state.tts_processor:
+            # 清空发送队列
+            while not session_state.tts_processor.send_queue.empty():
+                try:
+                    session_state.tts_processor.send_queue.get_nowait()
+                    session_state.tts_processor.send_queue.task_done()
+                except:
+                    pass
+        
+        # 清空全局句子队列
+        while not SimpleAzureTTS.global_sentence_queue.empty():
+            try:
+                SimpleAzureTTS.global_sentence_queue.get_nowait()
+                SimpleAzureTTS.global_sentence_queue.task_done()
+            except:
+                pass
+    
+    # 通知客户端停止任何音频播放
+    await websocket.send_json({
+        "type": "stop_audio",
+        "session_id": session_id
+    })
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    """WebSocket连接终端点
-    
-    处理与客户端的实时通信
-    
-    Args:
-        websocket: WebSocket连接
-    """
+    """WebSocket连接终端点，处理与客户端的实时通信"""
     await websocket.accept()
     
     # 获取当前事件循环
@@ -1510,22 +1450,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def get_root() -> str:
-    """返回主页HTML
-    
-    Returns:
-        HTML文本
-    """
+    """返回主页HTML"""
     with open("static/index.html", "r", encoding="utf-8") as f:
         return f.read()
 
 # 添加应用健康检查端点
 @app.get("/health")
 async def health_check() -> dict:
-    """健康检查端点
-    
-    Returns:
-        健康状态信息
-    """
+    """健康检查端点"""
     return {
         "status": "ok",
         "version": "1.0.0",
@@ -1533,46 +1465,6 @@ async def health_check() -> dict:
         "azure_speech_configured": bool(Config.AZURE_SPEECH_KEY and Config.AZURE_SPEECH_REGION),
         "openai_configured": bool(Config.OPENAI_API_KEY)
     }
-
-async def stop_tts_and_clear_queues(websocket: WebSocket, session_id: str) -> None:
-    """停止TTS响应并清空所有队列
-    
-    Args:
-        websocket: WebSocket连接
-        session_id: 会话ID
-    """
-    # 获取会话状态
-    session_state = session_states.get(session_id)
-    if session_state:
-        # 标记中断
-        session_state.request_interrupt()
-        
-        # 中断TTS
-        await SimpleAzureTTS.interrupt_session(session_id)
-        
-        # 清空TTS处理器队列
-        if session_state.tts_processor:
-            # 清空发送队列
-            while not session_state.tts_processor.send_queue.empty():
-                try:
-                    session_state.tts_processor.send_queue.get_nowait()
-                    session_state.tts_processor.send_queue.task_done()
-                except:
-                    pass
-        
-        # 清空全局句子队列
-        while not SimpleAzureTTS.global_sentence_queue.empty():
-            try:
-                SimpleAzureTTS.global_sentence_queue.get_nowait()
-                SimpleAzureTTS.global_sentence_queue.task_done()
-            except:
-                pass
-    
-    # 通知客户端停止任何音频播放
-    await websocket.send_json({
-        "type": "stop_audio",
-        "session_id": session_id
-    })
 
 if __name__ == "__main__":
     import uvicorn
