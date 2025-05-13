@@ -1,366 +1,252 @@
 /**
  * WebSocket处理模块
- * 处理与服务器的WebSocket通信
  */
 
-// WebSocket变量
+// 状态变量
 let socket = null;
 let isAIResponding = false;
 
-/**
- * 初始化WebSocket连接
- * @param {Function} updateStatus - 更新状态的回调函数
- * @param {HTMLElement} startBtn - 开始按钮元素
- */
-function initializeWebSocket(updateStatus, startBtn) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    if (socket && socket.readyState !== WebSocket.CLOSED) {
-        socket.close();
-    }
-    
-    socket = new WebSocket(wsUrl);
-    
-    socket.onopen = function(event) {
-        console.log('WebSocket连接成功');
-        updateStatus('idle', '已连接，准备就绪');
-        startBtn.disabled = false;
+// WebSocket处理器对象
+const WebSocketHandler = {
+    // 获取当前WebSocket连接
+    getSocket() {
+        return socket;
+    },
+
+    // 初始化WebSocket连接
+    initializeWebSocket(updateStatus, startBtn) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
         
-        // 确保音频上下文已初始化
-        window.AudioProcessor.initAudioContext();
-    };
-    
-    socket.onmessage = function(event) {
-        try {
-            // 判断消息类型（文本或二进制）
-            if (typeof event.data === 'string') {
-                // JSON消息
-                const data = JSON.parse(event.data);
-                
-                // 处理普通JSON消息
-                handleSocketMessage(data, updateStatus);
-            } else if (event.data instanceof Blob) {
-                // 处理二进制音频数据
-                window.AudioProcessor.handleBinaryAudioData(event.data);
-            }
-        } catch (e) {
-            console.error('处理消息时出错:', e);
+        if (socket && socket.readyState !== WebSocket.CLOSED) {
+            socket.close();
         }
-    };
-    
-    socket.onclose = function(event) {
-        console.log('WebSocket连接关闭');
-        updateStatus('error', '连接已断开');
-        startBtn.disabled = true;
         
-        // 5秒后尝试重连
-        setTimeout(function() {
-            console.log('尝试重新连接...');
-            initializeWebSocket(updateStatus, startBtn);
-        }, 5000);
-    };
-    
-    socket.onerror = function(error) {
-        console.error('WebSocket错误:', error);
-        updateStatus('error', '连接错误');
-    };
-}
-
-/**
- * 处理WebSocket消息
- * @param {Object} data - 解析后的JSON消息
- * @param {Function} updateStatus - 更新状态的回调函数
- */
-function handleSocketMessage(data, updateStatus) {
-    // 使用DOM选择器直接获取元素
-    const messages = document.getElementById('messages');
-
-    switch (data.type) {
-        case 'partial_transcript':
-            if (data.content.trim()) {
-                // 检查是否已有当前用户气泡
-                const userBubble = document.getElementById('current-user-bubble');
-                
-                if (userBubble) {
-                    // 更新现有气泡内容
-                    userBubble.textContent = data.content;
-                } else {
-                    // 创建新的用户消息气泡
-                    if (messages) {
-                        // 创建消息包装容器
-                        const messageWrapper = document.createElement('div');
-                        messageWrapper.style.display = 'flex';
-                        messageWrapper.style.justifyContent = 'flex-end';
-                        messageWrapper.style.width = '100%';
-                        messageWrapper.id = 'current-user-wrapper';
-                        
-                        // 创建消息元素
-                        const message = document.createElement('div');
-                        message.className = 'message user-message message-short';
-                        message.id = 'current-user-bubble';
-                        message.textContent = data.content;
-                        
-                        // 组装元素
-                        messageWrapper.appendChild(message);
-                        messages.appendChild(messageWrapper);
-                        
-                        // 滚动到底部
-                        messages.scrollTop = messages.scrollHeight;
-                    }
-                }
-            }
-            break;
+        socket = new WebSocket(wsUrl);
         
-        case 'final_transcript':
-            // 获取并更新当前用户气泡
-            const userBubble = document.getElementById('current-user-bubble');
-            const userWrapper = document.getElementById('current-user-wrapper');
+        socket.onopen = () => {
+            console.log('WebSocket连接成功');
+            updateStatus('idle', '已连接，准备就绪');
+            startBtn.disabled = false;
             
-            if (userBubble && userWrapper) {
-                // 更新内容
-                userBubble.textContent = data.content;
-                
-                // 移除ID以便下一次创建新气泡
-                userBubble.id = '';
-                userWrapper.id = '';
-            } else {
-                // 如果没有现有气泡，直接添加新消息
-                addMessage(data.content, 'user');
-            }
-            break;
+            // 确保音频上下文已初始化
+            window.AudioProcessor.initAudioContext();
+        };
         
-        case 'llm_status':
-            if (data.status === 'processing') {
-                updateStatus('thinking', 'AI思考中...');
-                isAIResponding = true;
-                
-                // 创建或重置AI消息容器
-                if (messages) {
-                    // 删除现有的打字指示器和消息容器
-                    const existingTyping = document.getElementById('ai-typing');
-                    if (existingTyping) {
-                        existingTyping.remove();
-                    }
-                    
-                    const existingContainer = document.getElementById('ai-message-container');
-                    if (existingContainer) {
-                        existingContainer.remove();
-                    }
-                    
-                    // 创建消息包装容器
-                    const messageWrapper = document.createElement('div');
-                    messageWrapper.style.display = 'flex';
-                    messageWrapper.style.justifyContent = 'flex-start';
-                    messageWrapper.style.width = '100%';
-                    
-                    // 创建新的AI消息容器
-                    const aiMessageContainer = document.createElement('div');
-                    aiMessageContainer.id = 'ai-message-container';
-                    aiMessageContainer.className = 'message ai-message stream-message message-short';
-                    
-                    // 添加打字指示器
-                    const typingIndicator = document.createElement('div');
-                    typingIndicator.id = 'ai-typing';
-                    typingIndicator.className = 'typing-indicator';
-                    typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                    
-                    // 组装元素
-                    aiMessageContainer.appendChild(typingIndicator);
-                    messageWrapper.appendChild(aiMessageContainer);
-                    messages.appendChild(messageWrapper);
-                    
-                    // 滚动到底部
-                    messages.scrollTop = messages.scrollHeight;
+        socket.onmessage = (event) => {
+            try {
+                // 处理文本或二进制消息
+                if (typeof event.data === 'string') {
+                    // 处理JSON消息
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data, updateStatus);
+                } else if (event.data instanceof Blob) {
+                    // 处理二进制音频数据
+                    window.AudioProcessor.handleBinaryAudioData(event.data);
                 }
+            } catch (e) {
+                console.error('处理消息错误:', e);
             }
-            break;
+        };
         
-        case 'llm_response':
-            // 获取AI消息容器
-            const aiMessageContainer = document.getElementById('ai-message-container');
+        socket.onclose = () => {
+            console.log('WebSocket连接关闭');
+            updateStatus('error', '连接已断开');
+            startBtn.disabled = true;
             
-            if (aiMessageContainer) {
-                // 删除打字指示器
-                const typingIndicator = document.getElementById('ai-typing');
-                if (typingIndicator) {
-                    typingIndicator.remove();
+            // 5秒后尝试重连
+            setTimeout(() => {
+                console.log('尝试重新连接...');
+                this.initializeWebSocket(updateStatus, startBtn);
+            }, 5000);
+        };
+        
+        socket.onerror = (error) => {
+            console.error('WebSocket错误:', error);
+            updateStatus('error', '连接错误');
+        };
+    },
+
+    // 处理WebSocket消息
+    handleMessage(data, updateStatus) {
+        const messages = document.getElementById('messages');
+        
+        switch (data.type) {
+            case 'partial_transcript':
+                this.handlePartialTranscript(data, messages);
+                break;
+            
+            case 'final_transcript':
+                this.handleFinalTranscript(data, messages);
+                break;
+            
+            case 'llm_status':
+                this.handleLLMStatus(data, updateStatus, messages);
+                break;
+            
+            case 'llm_response':
+                this.handleLLMResponse(data, updateStatus, messages);
+                break;
+            
+            case 'tts_sentence_start':
+            case 'tts_sentence_end':
+            case 'error':
+                console.log(`收到消息: ${data.type}`, data);
+                if (data.type === 'error') {
+                    updateStatus('error', data.message || '发生错误');
                 }
-                
-                if (data.is_complete) {
-                    // 更新完整消息内容
-                    aiMessageContainer.textContent = data.content;
-                    aiMessageContainer.classList.remove('stream-message');
-                    
-                    // 根据内容长度设置不同的大小类
-                    aiMessageContainer.classList.remove('message-short', 'message-medium', 'message-long');
-                    if (data.content.length < 20) {
-                        aiMessageContainer.classList.add('message-short');
-                    } else if (data.content.length < 100) {
-                        aiMessageContainer.classList.add('message-medium');
-                    } else {
-                        aiMessageContainer.classList.add('message-long');
-                    }
-                    
-                    // 重置ID以便下一次响应
-                    aiMessageContainer.id = '';
-                    updateStatus('idle', '已完成');
-                    isAIResponding = false;
-                } else {
-                    // 更新流式内容
-                    aiMessageContainer.textContent = data.content;
-                    
-                    // 根据当前内容长度设置不同的大小类
-                    aiMessageContainer.classList.remove('message-short', 'message-medium', 'message-long');
-                    if (data.content.length < 20) {
-                        aiMessageContainer.classList.add('message-short');
-                    } else if (data.content.length < 100) {
-                        aiMessageContainer.classList.add('message-medium');
-                    } else {
-                        aiMessageContainer.classList.add('message-long');
-                    }
-                    
-                    // 保留打字指示器
-                    const typingIndicator = document.createElement('div');
-                    typingIndicator.id = 'ai-typing';
-                    typingIndicator.className = 'typing-indicator';
-                    typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                    aiMessageContainer.appendChild(typingIndicator);
-                }
-                
-                // 滚动到底部
-                if (messages) {
-                    messages.scrollTop = messages.scrollHeight;
-                }
-            } else if (data.is_complete) {
-                // 如果没有找到容器但收到了完整响应，创建新消息
-                addMessage(data.content, 'ai');
+                break;
+        }
+    },
+
+    // 处理部分转录结果
+    handlePartialTranscript(data, messages) {
+        if (!data.content.trim()) return;
+        
+        // 检查或创建用户消息气泡
+        let userBubble = document.getElementById('current-user-bubble');
+        
+        if (userBubble) {
+            // 更新现有气泡
+            userBubble.textContent = data.content;
+        } else {
+            // 创建新的用户消息
+            const message = document.createElement('div');
+            message.className = 'message user-message';
+            message.id = 'current-user-bubble';
+            message.textContent = data.content;
+            
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+        }
+    },
+
+    // 处理最终转录结果
+    handleFinalTranscript(data, messages) {
+        const userBubble = document.getElementById('current-user-bubble');
+        
+        if (userBubble) {
+            // 更新最终内容
+            userBubble.textContent = data.content;
+            userBubble.id = '';
+        } else {
+            // 创建新的用户消息
+            const message = document.createElement('div');
+            message.className = 'message user-message';
+            message.textContent = data.content;
+            
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+        }
+    },
+
+    // 处理LLM状态
+    handleLLMStatus(data, updateStatus, messages) {
+        if (data.status === 'processing') {
+            updateStatus('thinking', 'AI思考中...');
+            isAIResponding = true;
+            
+            // 移除现有的AI消息容器
+            const existingContainer = document.getElementById('ai-message-container');
+            if (existingContainer) existingContainer.remove();
+            
+            // 创建新的AI消息容器
+            const aiMessage = document.createElement('div');
+            aiMessage.id = 'ai-message-container';
+            aiMessage.className = 'message ai-message';
+            
+            // 添加打字指示器
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+            
+            aiMessage.appendChild(typingIndicator);
+            messages.appendChild(aiMessage);
+            messages.scrollTop = messages.scrollHeight;
+        }
+    },
+
+    // 处理LLM响应
+    handleLLMResponse(data, updateStatus, messages) {
+        const aiMessage = document.getElementById('ai-message-container');
+        
+        if (aiMessage) {
+            // 清除内容，包括打字指示器
+            aiMessage.innerHTML = '';
+            
+            // 添加新内容
+            aiMessage.textContent = data.content;
+            
+            if (data.is_complete) {
+                // 消息完成，移除ID
+                aiMessage.id = '';
                 updateStatus('idle', '已完成');
                 isAIResponding = false;
+            } else {
+                // 继续流式响应，添加打字指示器
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                aiMessage.appendChild(typingIndicator);
             }
-            break;
-        
-        case 'tts_sentence_start':
-            console.log(`开始处理新句子: ${data.text}, ID: ${data.sentence_id}`);
-            break;
-        
-        case 'tts_sentence_end':
-            console.log(`句子处理结束: ID: ${data.sentence_id}`);
-            break;
-        
-        case 'status':
-            if (data.status === 'listening') {
-                updateStatus('listening', '正在听取...');
-            } else if (data.status === 'stopped') {
-                updateStatus('idle', '已停止');
-            }
-            break;
-        
-        case 'error':
-            console.error('Server error:', data.message);
-            updateStatus('error', `错误: ${data.message}`);
-            break;
-        
-        case 'server_interrupt':
-            console.log("收到服务器打断信令:", data.message);
-            window.AudioProcessor.stopAudioPlayback();
-            updateStatus('listening', '已打断，正在听取...');
+            
+            messages.scrollTop = messages.scrollHeight;
+        } else if (data.is_complete) {
+            // 创建新消息
+            const message = document.createElement('div');
+            message.className = 'message ai-message';
+            message.textContent = data.content;
+            
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+            updateStatus('idle', '已完成');
             isAIResponding = false;
-            break;
-        
-        case 'stop_acknowledged':
-            console.log("收到停止确认:", data.message);
-            window.AudioProcessor.stopAudioPlayback();
-            updateStatus('idle', '已停止');
-            isAIResponding = false;
-            break;
-    }
-}
-
-/**
- * 添加消息到对话框
- * @param {string} text - 消息文本
- * @param {string} type - 消息类型 (user/ai)
- */
-function addMessage(text, type) {
-    const messages = document.getElementById('messages');
-    if (!messages) return;
-    
-    // 创建消息包装容器
-    const messageWrapper = document.createElement('div');
-    messageWrapper.style.display = 'flex';
-    messageWrapper.style.justifyContent = type === 'user' ? 'flex-end' : 'flex-start';
-    messageWrapper.style.width = '100%';
-    
-    // 创建消息元素
-    const message = document.createElement('div');
-    message.className = `message ${type}-message`;
-    
-    // 使用textContent避免XSS风险
-    message.textContent = text;
-    
-    // 根据内容长度设置不同的大小类
-    if (text.length < 20) {
-        message.classList.add('message-short');
-    } else if (text.length < 100) {
-        message.classList.add('message-medium');
-    } else {
-        message.classList.add('message-long');
-    }
-    
-    // 添加进入动画
-    message.style.opacity = '0';
-    message.style.transform = 'translateY(10px)';
-    
-    // 组装元素
-    messageWrapper.appendChild(message);
-    messages.appendChild(messageWrapper);
-    
-    // 强制回流，然后应用动画
-    void message.offsetWidth;
-    message.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    message.style.opacity = '1';
-    message.style.transform = 'translateY(0)';
-    
-    // 滚动到底部
-    messages.scrollTop = messages.scrollHeight;
-}
-
-/**
- * 发送命令到服务器
- * @param {string} type - 命令类型
- * @param {Object} [data] - 可选的附加数据
- */
-function sendCommand(type, data = {}) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        const message = { type, ...data };
-        socket.send(JSON.stringify(message));
-    }
-}
-
-/**
- * 检查用户语音是否打断AI响应
- * @param {Float32Array} audioData - 音频数据
- */
-function checkVoiceInterruption(audioData) {
-    if (isAIResponding) {
-        const audioLevel = window.AudioProcessor.detectAudioLevel(audioData);
-        if (audioLevel > 0.05) {
-            sendCommand('interrupt');
-            isAIResponding = false;
-            return true;
         }
-    }
-    return false;
-}
+    },
 
-// 导出功能
-window.WebSocketHandler = {
-    initializeWebSocket,
-    handleSocketMessage,
-    addMessage,
-    sendCommand,
-    checkVoiceInterruption,
-    getSocket: () => socket,
-    isAIResponding: () => isAIResponding
-}; 
+    // 发送命令
+    sendCommand(type, data = {}) {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket未连接，无法发送命令');
+            return;
+        }
+        
+        const command = {
+            type: type,
+            ...data
+        };
+        
+        socket.send(JSON.stringify(command));
+        console.log(`发送命令: ${type}`);
+    },
+
+    // 检查用户语音中断
+    checkVoiceInterruption(audioData) {
+        if (!isAIResponding) return;
+        
+        // 简化：检测音量超过阈值时中断AI响应
+        const volume = this.calculateAudioLevel(audioData);
+        const THRESHOLD = 0.1;
+        
+        if (volume > THRESHOLD) {
+            console.log('检测到用户开始说话，停止AI响应');
+            this.sendCommand('interrupt');
+            isAIResponding = false;
+        }
+    },
+
+    // 计算音频音量级别
+    calculateAudioLevel(audioData) {
+        if (!audioData || audioData.length === 0) return 0;
+        
+        let sum = 0;
+        for (let i = 0; i < audioData.length; i++) {
+            sum += Math.abs(audioData[i]);
+        }
+        
+        return sum / audioData.length;
+    }
+};
+
+// 导出WebSocketHandler对象
+window.WebSocketHandler = WebSocketHandler; 

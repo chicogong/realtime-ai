@@ -3,29 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>实时AI对话</title>
+    <title>AI对话</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
-        <h1>实时AI对话</h1>
-        
-        <div class="status-container">
+        <header>
+            <h1>AI对话</h1>
             <div class="status">
-                <span class="status-dot idle" id="status-dot"></span>
+                <span id="status-dot"></span>
                 <span id="status-text">准备就绪</span>
             </div>
-        </div>
+        </header>
         
-        <div class="chat-container">
-            <div class="messages" id="messages"></div>
-        </div>
+        <main class="chat-container">
+            <div id="messages"></div>
+        </main>
         
-        <div class="controls">
-            <button id="start-btn">开始对话</button>
-            <button id="stop-btn" class="stop" disabled>停止对话</button>
+        <footer class="controls">
+            <button id="start-btn">开始</button>
+            <button id="stop-btn" disabled>停止</button>
             <button id="reset-btn">重置</button>
-        </div>
+        </footer>
     </div>
     
     <script src="/static/js/audio-processor.js"></script>
