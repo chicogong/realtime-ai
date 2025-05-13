@@ -90,6 +90,17 @@ const WebSocketHandler = {
             
             case 'tts_sentence_start':
             case 'tts_sentence_end':
+                console.log(`收到消息: ${data.type}`, data);
+                break;
+                
+            case 'server_interrupt':
+            case 'interrupt_acknowledged':
+            case 'stop_acknowledged':
+                console.log(`收到消息: ${data.type}`, data);
+                // 立即停止所有音频播放
+                window.AudioProcessor.stopAudioPlayback();
+                break;
+                
             case 'error':
                 console.log(`收到消息: ${data.type}`, data);
                 if (data.type === 'error') {
@@ -218,6 +229,26 @@ const WebSocketHandler = {
         
         socket.send(JSON.stringify(command));
         console.log(`发送命令: ${type}`);
+    },
+
+    // 发送停止并清空队列的命令
+    sendStopAndClearQueues() {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket未连接，无法发送命令');
+            return;
+        }
+        
+        const command = {
+            type: 'stop',
+            clear_queues: true,  // 指示服务器清空所有发送队列
+            force_stop: true     // 强制停止所有处理
+        };
+        
+        socket.send(JSON.stringify(command));
+        console.log('发送强制停止并清空队列命令');
+        
+        // 立即停止本地音频播放
+        window.AudioProcessor.stopAudioPlayback();
     },
 
     // 检查用户语音中断

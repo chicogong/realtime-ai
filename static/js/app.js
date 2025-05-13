@@ -175,14 +175,17 @@ function stopRecording() {
         processor = null;
     }
     
+    // 停止所有正在播放的音频
+    window.AudioProcessor.stopAudioPlayback();
+    
     // 暂停音频上下文（如果没有音频播放）
     const audioContext = getAudioContext();
     if (audioContext && audioContext.state === "running" && !isAudioPlaying()) {
         audioContext.suspend().catch(console.error);
     }
     
-    // 发送停止命令
-    window.WebSocketHandler.sendCommand('stop');
+    // 发送停止并清空队列命令
+    window.WebSocketHandler.sendStopAndClearQueues();
     
     // 更新UI
     startBtn.disabled = false;

@@ -1393,10 +1393,39 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             # 中断TTS
                             await SimpleAzureTTS.interrupt_session(session_id)
                             
+                            # 检查是否需要清空队列
+                            clear_queues = message.get("clear_queues", False)
+                            force_stop = message.get("force_stop", False)
+                            
+                            if clear_queues:
+                                logger.info(f"清空所有音频发送队列，会话ID: {session_id}")
+                                # 清空TTS处理器队列
+                                if session_state.tts_processor:
+                                    # 清空发送队列
+                                    while not session_state.tts_processor.send_queue.empty():
+                                        try:
+                                            session_state.tts_processor.send_queue.get_nowait()
+                                            session_state.tts_processor.send_queue.task_done()
+                                        except:
+                                            pass
+                                
+                                # 清空全局句子队列 
+                                while not SimpleAzureTTS.global_sentence_queue.empty():
+                                    try:
+                                        SimpleAzureTTS.global_sentence_queue.get_nowait()
+                                        SimpleAzureTTS.global_sentence_queue.task_done()
+                                    except:
+                                        pass
+                            
+                            if force_stop and session_state.is_tts_active:
+                                logger.info(f"强制停止所有TTS处理，会话ID: {session_id}")
+                                session_state.is_tts_active = False
+                            
                             # 通知客户端已完全停止
                             await websocket.send_json({
                                 "type": "stop_acknowledged",
                                 "message": "所有处理已停止",
+                                "queues_cleared": clear_queues,
                                 "session_id": session_id
                             })
                     elif cmd_type == "start":

@@ -91,16 +91,18 @@ const AudioProcessor = {
             // 添加播放结束事件
             source.onended = () => {
                 currentAudioSource = null;
-                isPlayingAudio = false;
                 
                 // 播放队列中的下一个，使用微小延迟避免衔接问题
-                if (audioBufferQueue.length > 0) {
+                // 只有在isPlayingAudio为true时才继续播放队列中的下一项
+                if (isPlayingAudio && audioBufferQueue.length > 0) {
                     setTimeout(() => {
-                        if (audioBufferQueue.length > 0) {
+                        if (isPlayingAudio && audioBufferQueue.length > 0) {
                             const nextBuffer = audioBufferQueue.shift();
                             this.playAudio(nextBuffer);
                         }
                     }, 5);  // 5ms延迟，足够短但有助于音频平滑衔接
+                } else {
+                    isPlayingAudio = false;
                 }
             };
             
