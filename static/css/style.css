@@ -88,6 +88,8 @@ button.stop:hover {
     flex: 1;
     overflow-y: auto;
     padding: 15px;
+    display: flex;
+    flex-direction: column;
 }
 
 .input-area {
@@ -96,28 +98,117 @@ button.stop:hover {
     padding: 10px;
 }
 
+.partial-transcript {
+    width: 100%;
+    min-height: 20px;
+    font-style: italic;
+    color: #7f8c8d;
+    font-size: 0.9em;
+    padding: 5px;
+    border-radius: 4px;
+    background-color: rgba(236, 240, 241, 0.5);
+}
+
 .message {
     margin-bottom: 15px;
-    max-width: 80%;
     padding: 10px 15px;
     border-radius: 18px;
     line-height: 1.4;
+    max-width: 80%;
+    width: auto;
+    display: inline-block;
+    word-wrap: break-word;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .user-message {
-    align-self: flex-end;
     background-color: #3498db;
     color: white;
-    margin-left: auto;
+    border-bottom-right-radius: 4px;
+}
+
+.user-message::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: -8px;
+    width: 16px;
+    height: 16px;
+    background: radial-gradient(circle at top right, transparent 16px, #3498db 0);
 }
 
 .ai-message {
     background-color: #f1f1f1;
     color: #333;
+    border-bottom-left-radius: 4px;
+}
+
+.ai-message::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: -8px;
+    width: 16px;
+    height: 16px;
+    background: radial-gradient(circle at top left, transparent 16px, #f1f1f1 0);
+}
+
+.stream-message {
+    position: relative;
+    min-height: 20px;
+    border-left: 3px solid #3498db;
+    animation: fadeIn 0.3s ease-in-out;
+    min-width: 50px;
+    background-color: #f1f1f1;
+    border-bottom-left-radius: 4px;
+}
+
+.stream-message::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: -8px;
+    width: 16px;
+    height: 16px;
+    background: radial-gradient(circle at top left, transparent 16px, #f1f1f1 0);
+}
+
+/* Short messages should have a minimum width */
+.message:empty, 
+.message:only-child {
+    min-width: 40px;
+}
+
+/* Long messages should wrap */
+.message-long {
+    max-width: 80%;
+}
+
+/* Medium messages should be sized appropriately */
+.message-medium {
+    max-width: 60%;
+}
+
+/* Short messages should be compact */
+.message-short {
+    max-width: 40%;
+}
+
+/* Message animations and transitions */
+.message {
+    transition: max-width 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0.7; }
+    to { opacity: 1; }
 }
 
 .typing-indicator {
     display: inline-block;
+    vertical-align: middle;
+    margin-left: 5px;
 }
 
 .typing-indicator span {
@@ -125,7 +216,7 @@ button.stop:hover {
     width: 5px;
     margin-right: 3px;
     border-radius: 50%;
-    background-color: #bdc3c7;
+    background-color: #3498db;
     display: inline-block;
     animation: typingPulse 1s infinite ease-in-out;
 }

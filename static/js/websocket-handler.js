@@ -99,28 +99,105 @@ function handleSocketMessage(data, updateStatus) {
                 updateStatus('thinking', 'AI思考中...');
                 isAIResponding = true;
                 
-                // 显示AI正在输入
+                // 创建或重置AI消息容器
                 if (messages) {
-                    const typingMessage = document.createElement('div');
-                    typingMessage.id = 'ai-typing';
-                    typingMessage.className = 'message ai-message';
-                    typingMessage.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-                    messages.appendChild(typingMessage);
+                    // 删除现有的打字指示器和消息容器
+                    const existingTyping = document.getElementById('ai-typing');
+                    if (existingTyping) {
+                        existingTyping.remove();
+                    }
+                    
+                    const existingContainer = document.getElementById('ai-message-container');
+                    if (existingContainer) {
+                        existingContainer.remove();
+                    }
+                    
+                    // 创建消息包装容器（为了正确定位）
+                    const messageWrapper = document.createElement('div');
+                    messageWrapper.style.display = 'flex';
+                    messageWrapper.style.justifyContent = 'flex-start';
+                    messageWrapper.style.width = '100%';
+                    
+                    // 创建新的AI消息容器
+                    const aiMessageContainer = document.createElement('div');
+                    aiMessageContainer.id = 'ai-message-container';
+                    aiMessageContainer.className = 'message ai-message stream-message message-short';
+                    
+                    // 添加打字指示器
+                    const typingIndicator = document.createElement('div');
+                    typingIndicator.id = 'ai-typing';
+                    typingIndicator.className = 'typing-indicator';
+                    typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                    
+                    // 组装元素
+                    aiMessageContainer.appendChild(typingIndicator);
+                    messageWrapper.appendChild(aiMessageContainer);
+                    messages.appendChild(messageWrapper);
+                    
+                    // 滚动到底部
                     messages.scrollTop = messages.scrollHeight;
                 }
             }
             break;
         
         case 'llm_response':
-            // 删除输入指示器
-            const typingIndicator = document.getElementById('ai-typing');
-            if (typingIndicator) {
-                typingIndicator.remove();
-            }
+            // 获取AI消息容器
+            const aiMessageContainer = document.getElementById('ai-message-container');
             
-            // 处理响应
-            if (data.is_complete) {
-                // 完整响应
+            if (aiMessageContainer) {
+                // 删除打字指示器
+                const typingIndicator = document.getElementById('ai-typing');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                
+                if (data.is_complete) {
+                    // 更新完整消息内容
+                    aiMessageContainer.textContent = data.content;
+                    aiMessageContainer.classList.remove('stream-message');
+                    
+                    // 根据内容长度设置不同的大小类
+                    aiMessageContainer.classList.remove('message-short', 'message-medium', 'message-long');
+                    if (data.content.length < 20) {
+                        aiMessageContainer.classList.add('message-short');
+                    } else if (data.content.length < 100) {
+                        aiMessageContainer.classList.add('message-medium');
+                    } else {
+                        aiMessageContainer.classList.add('message-long');
+                    }
+                    
+                    // 重置ID以便下一次响应
+                    aiMessageContainer.id = '';
+                    updateStatus('idle', '已完成');
+                    isAIResponding = false;
+                } else {
+                    // 更新流式内容
+                    aiMessageContainer.textContent = data.content;
+                    
+                    // 根据当前内容长度设置不同的大小类
+                    aiMessageContainer.classList.remove('message-short', 'message-medium', 'message-long');
+                    if (data.content.length < 20) {
+                        aiMessageContainer.classList.add('message-short');
+                    } else if (data.content.length < 100) {
+                        aiMessageContainer.classList.add('message-medium');
+                    } else {
+                        aiMessageContainer.classList.add('message-long');
+                    }
+                    
+                    // 保留打字指示器
+                    const typingIndicator = document.createElement('div');
+                    typingIndicator.id = 'ai-typing';
+                    typingIndicator.className = 'typing-indicator';
+                    typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                    aiMessageContainer.appendChild(typingIndicator);
+                }
+                
+                // 滚动到底部
+                if (messages) {
+                    messages.scrollTop = messages.scrollHeight;
+                }
+            } else if (data.is_complete) {
+                // 如果没有找到容器但收到了完整响应，创建新消息
                 addMessage(data.content, 'ai');
                 updateStatus('idle', '已完成');
                 isAIResponding = false;
@@ -166,10 +243,43 @@ function addMessage(text, type) {
     const messages = document.getElementById('messages');
     if (!messages) return;
     
+    // 创建消息包装容器（为了正确定位）
+    const messageWrapper = document.createElement('div');
+    messageWrapper.style.display = 'flex';
+    messageWrapper.style.justifyContent = type === 'user' ? 'flex-end' : 'flex-start';
+    messageWrapper.style.width = '100%';
+    
+    // 创建消息元素
     const message = document.createElement('div');
     message.className = `message ${type}-message`;
+    
+    // 使用textContent避免XSS风险
     message.textContent = text;
-    messages.appendChild(message);
+    
+    // 根据内容长度设置不同的大小类
+    if (text.length < 20) {
+        message.classList.add('message-short');
+    } else if (text.length < 100) {
+        message.classList.add('message-medium');
+    } else {
+        message.classList.add('message-long');
+    }
+    
+    // 添加进入动画
+    message.style.opacity = '0';
+    message.style.transform = 'translateY(10px)';
+    
+    // 组装元素
+    messageWrapper.appendChild(message);
+    messages.appendChild(messageWrapper);
+    
+    // 强制回流，然后应用动画
+    void message.offsetWidth;
+    message.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    message.style.opacity = '1';
+    message.style.transform = 'translateY(0)';
+    
+    // 滚动到底部
     messages.scrollTop = messages.scrollHeight;
 }
 
