@@ -2,164 +2,305 @@ import asyncio
 import json
 import os
 import re
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import azure.cognitiveservices.speech as speechsdk
 import logging
-from dotenv import load_dotenv
 import uuid
 import threading
 import time
 import struct
-import openai
+from collections import deque
+from typing import Dict, Optional, Any, List, Callable, Coroutine
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+import azure.cognitiveservices.speech as speechsdk
+from dotenv import load_dotenv
+import httpx
 import async_timeout
 from openai import AsyncOpenAI
-import httpx
-from collections import deque
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI()
+# 加载环境变量
+load_dotenv()
 
-# Azure Speech SDK configuration
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+# 环境变量配置
+class Config:
+    """集中管理应用配置"""
+    # Azure 语音服务配置
+    AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+    AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+    AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+    
+    # OpenAI API配置
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+    
+    # 语音识别配置
+    ASR_LANGUAGE = "zh-CN"
+    VOICE_ENERGY_THRESHOLD = 0.05  # 语音能量阈值
+    
+    # 验证配置
+    @classmethod
+    def validate(cls):
+        """验证必要的配置是否存在"""
+        if not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION:
+            logger.error("Azure Speech凭据缺失。请设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION环境变量。")
+            return False
+            
+        if not cls.OPENAI_API_KEY:
+            logger.error("OpenAI API密钥缺失。请设置OPENAI_API_KEY环境变量。")
+            return False
+        
+        logger.info(f"使用OpenAI模型: {cls.OPENAI_MODEL}")
+        if cls.OPENAI_BASE_URL:
+            logger.info(f"使用自定义OpenAI基础URL: {cls.OPENAI_BASE_URL}")
+        
+        return True
 
-# Azure TTS configuration
-AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+# 验证配置
+Config.validate()
 
-# OpenAI API configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+# 初始化FastAPI应用
+app = FastAPI(title="实时AI对话API")
 
-# Configure OpenAI client
-if OPENAI_BASE_URL:
-    openai_client = AsyncOpenAI(
-        api_key=OPENAI_API_KEY,
-        base_url=OPENAI_BASE_URL
-    )
-else:
-    openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+# 配置OpenAI客户端
+openai_client = AsyncOpenAI(
+    api_key=Config.OPENAI_API_KEY,
+    base_url=Config.OPENAI_BASE_URL if Config.OPENAI_BASE_URL else None
+)
 
-if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
-    logger.error("Azure Speech credentials not found. Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION environment variables.")
-
-if not OPENAI_API_KEY:
-    logger.error("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
-else:
-    logger.info(f"Using OpenAI model: {OPENAI_MODEL}")
-    if OPENAI_BASE_URL:
-        logger.info(f"Using custom OpenAI base URL: {OPENAI_BASE_URL}")
-
-# 新增：存储用户会话状态的字典
-session_states = {}
-
-# 新增：会话状态类
+# 会话状态管理
 class SessionState:
-    def __init__(self, session_id):
+    """管理用户会话状态"""
+    
+    def __init__(self, session_id: str):
+        """初始化会话状态
+        
+        Args:
+            session_id: 会话唯一标识符
+        """
         self.session_id = session_id
-        self.is_processing_llm = False
-        self.is_tts_active = False
-        self.response_stream = None
-        self.interrupt_requested = False
-        self.tts_processor = None
-
-    def request_interrupt(self):
+        self.is_processing_llm = False  # 是否正在处理LLM请求
+        self.is_tts_active = False      # 是否正在进行TTS合成
+        self.response_stream = None     # 当前响应流
+        self.interrupt_requested = False # 是否请求中断
+        self.tts_processor = None       # TTS处理器
+        self.last_activity = time.time() # 最后活动时间
+    
+    def request_interrupt(self) -> None:
         """标记会话需要被中断"""
-        logger.info(f"Interruption requested for session {self.session_id}")
+        logger.info(f"中断请求已接收，会话ID: {self.session_id}")
         self.interrupt_requested = True
-
-    def clear_interrupt(self):
+    
+    def clear_interrupt(self) -> None:
         """清除中断标记"""
         self.interrupt_requested = False
-
-    def is_interrupted(self):
+    
+    def is_interrupted(self) -> bool:
         """检查是否请求了中断"""
         return self.interrupt_requested
+    
+    def update_activity(self) -> None:
+        """更新最后活动时间"""
+        self.last_activity = time.time()
+    
+    def is_inactive(self, timeout_seconds: int = 300) -> bool:
+        """检查会话是否已不活跃
+        
+        Args:
+            timeout_seconds: 超时时间（秒）
+            
+        Returns:
+            如果会话不活跃，返回True
+        """
+        return (time.time() - self.last_activity) > timeout_seconds
 
+# 会话状态字典
+session_states: Dict[str, SessionState] = {}
+
+# 音频诊断工具
 class AudioDiagnostics:
-    """Helper class to diagnose audio issues"""
+    """音频问题诊断辅助类"""
+    
     def __init__(self):
+        """初始化音频诊断工具"""
         self.total_bytes = 0
         self.chunks_received = 0
         self.last_report_time = time.time()
-        self.report_interval = 5  # seconds
+        self.report_interval = 5  # 报告间隔（秒）
+        self.first_chunk = None
+    
+    def record_chunk(self, chunk: bytes) -> None:
+        """记录音频块信息
         
-    def record_chunk(self, chunk):
-        """Record information about an audio chunk"""
+        Args:
+            chunk: 音频数据块
+        """
+        if not chunk:
+            return
+            
         self.total_bytes += len(chunk)
         self.chunks_received += 1
         
-        # Report stats periodically
+        # 保存首个块以便分析
+        if not self.first_chunk:
+            self.first_chunk = chunk
+            self.analyze_audio_format(chunk)
+        
+        # 定期报告统计信息
         current_time = time.time()
         if current_time - self.last_report_time > self.report_interval:
             self.report_stats()
             self.last_report_time = current_time
-            
-    def report_stats(self):
-        """Report audio statistics"""
+    
+    def report_stats(self) -> None:
+        """报告音频统计信息"""
         if self.chunks_received == 0:
-            logger.warning("No audio chunks received in the last interval")
+            logger.warning("本报告周期内未收到音频块")
             return
-            
+        
         avg_chunk_size = self.total_bytes / self.chunks_received
         
-        # Check if audio data seems valid
+        # 检查音频数据是否有效
         if avg_chunk_size < 10:
-            logger.warning(f"Audio chunks seem very small (avg {avg_chunk_size:.2f} bytes)")
+            logger.warning(f"音频块非常小（平均{avg_chunk_size:.2f}字节）")
         
-        logger.info(f"Audio stats: {self.chunks_received} chunks, {self.total_bytes} bytes total, {avg_chunk_size:.2f} bytes avg")
+        logger.info(f"音频统计: {self.chunks_received}块, 共{self.total_bytes}字节, 平均{avg_chunk_size:.2f}字节/块")
         
-        # Analyze first few bytes of first chunk to check format if we have chunks
-        if self.chunks_received > 0 and hasattr(self, 'first_chunk') and self.first_chunk:
-            self.analyze_audio_format(self.first_chunk)
-            
-        # Reset counters for next interval
+        # 重置计数器
         self.total_bytes = 0
         self.chunks_received = 0
     
-    def save_first_chunk(self, chunk):
-        """Save first chunk for format analysis"""
-        if not hasattr(self, 'first_chunk') or not self.first_chunk:
-            self.first_chunk = chunk
-            self.analyze_audio_format(chunk)
-    
-    def analyze_audio_format(self, chunk):
-        """Try to detect audio format issues"""
+    def analyze_audio_format(self, chunk: bytes) -> None:
+        """分析音频格式以检测潜在问题
+        
+        Args:
+            chunk: 音频数据块
+        """
         if len(chunk) < 10:
-            logger.warning("Audio chunk too small to analyze format")
+            logger.warning("音频块太小，无法分析格式")
             return
-            
-        # Check if data looks like PCM (should have variation in values)
+        
         try:
-            # Try to interpret as 16-bit PCM
-            if len(chunk) >= 20:  # Get at least 10 samples
+            # 尝试解析为16位PCM
+            if len(chunk) >= 20:  # 至少取10个样本
                 pcm_samples = struct.unpack(f"<{len(chunk)//2}h", chunk[:20])
                 
-                # Check amplitude variation
+                # 检查振幅变化
                 min_val = min(pcm_samples)
                 max_val = max(pcm_samples)
-                if max_val - min_val < 100:
-                    logger.warning(f"Low audio amplitude variation: min={min_val}, max={max_val}. Check if microphone is working")
-                    
-                # Check if all zero (silence)
+                amplitude_range = max_val - min_val
+                
+                if amplitude_range < 100:
+                    logger.warning(f"音频振幅变化很小: 最小={min_val}, 最大={max_val}。请检查麦克风是否正常工作")
+                
+                # 检查是否全为零（静音）
                 if max_val == 0 and min_val == 0:
-                    logger.warning("Audio appears to be silence (all zeros)")
-                    
-                logger.info(f"Audio seems to be PCM format with amplitude range: {min_val} to {max_val}")
+                    logger.warning("音频数据全为零（静音）")
+                
+                logger.info(f"音频格式看起来是PCM，振幅范围: {min_val}至{max_val}")
         except Exception as e:
-            logger.warning(f"Failed to analyze audio format: {e}")
+            logger.warning(f"音频格式分析失败: {e}")
 
+# 语音活动检测器
+class VoiceActivityDetector:
+    """检测用户语音活动"""
+    
+    def __init__(self, energy_threshold: float = Config.VOICE_ENERGY_THRESHOLD):
+        """初始化语音活动检测器
+        
+        Args:
+            energy_threshold: 能量阈值，用于确定语音活动
+        """
+        self.energy_threshold = energy_threshold
+        self.frame_count = 0
+        self.voice_frames = 0
+        self.reset_interval = 20  # 每隔多少帧重置计数
+    
+    def reset(self) -> None:
+        """重置检测器状态"""
+        self.frame_count = 0
+        self.voice_frames = 0
+    
+    def detect(self, audio_chunk: bytes) -> bool:
+        """检测音频块中是否包含语音
+        
+        Args:
+            audio_chunk: 音频数据块
+            
+        Returns:
+            如果检测到语音，返回True
+        """
+        if not audio_chunk or len(audio_chunk) < 10:
+            return False
+        
+        # 仅每N帧检查一次
+        self.frame_count += 1
+        if self.frame_count > self.reset_interval:
+            self.reset()
+        
+        try:
+            # 计算音频能量
+            max_samples = min(50, len(audio_chunk) // 2)  # 最多处理50个样本
+            if max_samples <= 0:
+                return False
+            
+            # 解析PCM样本
+            pcm_samples = []
+            for i in range(max_samples):
+                if i*2+1 < len(audio_chunk):
+                    # 解析2字节为16位整数
+                    value = int.from_bytes(audio_chunk[i*2:i*2+2], byteorder='little', signed=True)
+                    pcm_samples.append(value)
+            
+            if not pcm_samples:
+                return False
+            
+            # 计算平均能量
+            energy = sum(abs(sample) for sample in pcm_samples) / len(pcm_samples)
+            
+            # 归一化能量值（16位PCM范围是-32768到32767）
+            normalized_energy = energy / 32768.0
+            
+            # 判断是否超过阈值
+            has_voice = normalized_energy > self.energy_threshold
+            if has_voice:
+                self.voice_frames += 1
+            
+            return has_voice
+            
+        except Exception as e:
+            logger.debug(f"语音检测错误: {e}")
+            return False
+    
+    def has_continuous_voice(self) -> bool:
+        """判断是否检测到连续的语音帧
+        
+        Returns:
+            如果有持续语音，返回True
+        """
+        # 如果语音帧数超过阈值比例，认为有持续语音
+        return self.voice_frames > (self.reset_interval * 0.3)
+
+# Azure流式语音识别器
 class AzureStreamingRecognizer:
-    def __init__(self, subscription_key, region, language="zh-CN"):
+    """Azure流式语音识别处理器"""
+    
+    def __init__(self, subscription_key: str, region: str, language: str = Config.ASR_LANGUAGE):
+        """初始化Azure语音识别器
+        
+        Args:
+            subscription_key: Azure语音服务订阅密钥
+            region: Azure语音服务区域
+            language: 识别的语言代码
+        """
         self.subscription_key = subscription_key
         self.region = region
         self.language = language
@@ -170,89 +311,96 @@ class AzureStreamingRecognizer:
         self.loop = None
         self.is_recognizing = False
         self.audio_diagnostics = AudioDiagnostics()
+        self.last_partial_result = ""  # 最后的部分识别结果
+        
+        # 初始化识别器
         self._setup_recognizer()
+    
+    def _setup_recognizer(self) -> None:
+        """设置Azure语音识别器"""
+        try:
+            # 创建推送流
+            self.push_stream = speechsdk.audio.PushAudioInputStream()
+            audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
+            
+            # 创建语音配置
+            speech_config = speechsdk.SpeechConfig(
+                subscription=self.subscription_key, 
+                region=self.region
+            )
+            speech_config.speech_recognition_language = self.language
+            
+            # 启用听写模式以获得更好的结果
+            speech_config.enable_dictation()
+            
+            # 记录音频格式信息
+            logger.info(f"Azure期望的音频格式: 16位PCM，16kHz，单声道")
+            
+            # 创建流式识别器
+            self.recognizer = speechsdk.SpeechRecognizer(
+                speech_config=speech_config,
+                audio_config=audio_config
+            )
+            
+            logger.info("Azure语音识别器初始化成功")
+        except Exception as e:
+            logger.error(f"设置Azure语音识别器失败: {e}")
+            raise
+    
+    def set_websocket(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop) -> None:
+        """设置WebSocket连接和事件循环
         
-    def _setup_recognizer(self):
-        # Create push stream
-        self.push_stream = speechsdk.audio.PushAudioInputStream()
-        audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
-        
-        # Create speech configuration
-        speech_config = speechsdk.SpeechConfig(
-            subscription=self.subscription_key, region=self.region)
-        speech_config.speech_recognition_language = self.language
-        
-        # # Set streaming behavior options
-        # speech_config.set_property(
-        #     speechsdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "Lexical"
-        # )
-        
-        # # Shorter silence timeouts for more responsive experience
-        # speech_config.set_property(
-        #     speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "2000"
-        # )
-        # speech_config.set_property(
-        #     speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "800"
-        # )
-        
-        # Enable both dictation and conversation modes for best results with Chinese
-        speech_config.enable_dictation()
-        
-        # Log audio format expected by Azure
-        logger.info(f"Azure expects audio format: 16-bit PCM, 16kHz, mono")
-        
-        # Streaming recognizer
-        self.recognizer = speechsdk.SpeechRecognizer(
-            speech_config=speech_config, 
-            audio_config=audio_config)
-        
-        # For tracking the last partial result
-        self.last_partial_result = ""
-        
-    def set_websocket(self, websocket, loop):
-        """Set the WebSocket connection and event loop for sending results"""
+        Args:
+            websocket: 连接到客户端的WebSocket对象
+            loop: 异步事件循环
+        """
         self.websocket = websocket
         self.loop = loop
-        
-    def setup_handlers(self):
-        """Set up event handlers for speech recognition"""
-        # Recognizing event (partial results)
+    
+    def setup_handlers(self) -> None:
+        """设置识别事件处理程序"""
+        # 识别中事件（部分结果）
         self.recognizer.recognizing.connect(self._on_recognizing)
-            
-        # Recognized event (final results)
+        
+        # 识别完成事件（最终结果）
         self.recognizer.recognized.connect(self._on_recognized)
-            
-        # Errors and cancellation
+        
+        # 错误和取消事件
         self.recognizer.canceled.connect(self._on_canceled)
         self.recognizer.session_stopped.connect(self._on_session_stopped)
         
-        # Speech start/end detection for better diagnostics
+        # 语音检测事件
         self.recognizer.session_started.connect(self._on_session_started)
         self.recognizer.speech_start_detected.connect(self._on_speech_start_detected)
         self.recognizer.speech_end_detected.connect(self._on_speech_end_detected)
     
-    def _on_session_started(self, evt):
-        """Handle session started event"""
-        logger.info(f"SESSION STARTED: {evt}")
-        
-    def _on_speech_start_detected(self, evt):
-        """Handle speech start detection"""
-        logger.info(f"SPEECH START DETECTED")
-        
-    def _on_speech_end_detected(self, evt):
-        """Handle speech end detection"""
-        logger.info(f"SPEECH END DETECTED")
+    def _on_session_started(self, evt) -> None:
+        """处理会话开始事件"""
+        logger.info(f"语音识别会话已开始: {evt}")
     
-    def _on_recognizing(self, evt):
-        """Handle partial recognition results"""
-        text = evt.result.text
-        logger.info(f"RECOGNIZING: '{text}'")
+    def _on_speech_start_detected(self, evt) -> None:
+        """处理语音开始检测"""
+        logger.info("检测到语音开始")
+    
+    def _on_speech_end_detected(self, evt) -> None:
+        """处理语音结束检测"""
+        logger.info("检测到语音结束")
+    
+    def _on_recognizing(self, evt) -> None:
+        """处理部分识别结果
         
-        # Save the last partial result if it's not empty
+        Args:
+            evt: 识别事件对象
+        """
+        text = evt.result.text
+        logger.info(f"部分识别: '{text}'")
+        
+        # 保存非空的部分结果
         if text.strip():
             self.last_partial_result = text
-            
-        if self.websocket and self.loop and text.strip():  # Only send non-empty results
+        
+        # 通过WebSocket发送部分识别结果
+        if self.websocket and self.loop and text.strip():
             async def send_partial():
                 await self.websocket.send_json({
                     "type": "partial_transcript",
@@ -262,41 +410,52 @@ class AzureStreamingRecognizer:
             
             asyncio.run_coroutine_threadsafe(send_partial(), self.loop)
     
-    def _on_recognized(self, evt):
-        """Handle final recognition results"""
-        text = evt.result.text
-        logger.info(f"RECOGNIZED: '{text}'")
+    def _on_recognized(self, evt) -> None:
+        """处理最终识别结果
         
-        # Only process non-empty results to avoid UI clutter
-        if self.websocket and self.loop and text.strip():
+        Args:
+            evt: 识别事件对象
+        """
+        text = evt.result.text
+        logger.info(f"最终识别: '{text}'")
+        
+        # 只处理非空结果
+        if text.strip() and self.websocket and self.loop:
             async def process_and_send_final():
+                # 发送最终识别结果
                 await self.websocket.send_json({
                     "type": "final_transcript",
                     "content": text,
                     "session_id": self.session_id
                 })
                 
-                # Send to LLM for processing if the text is not empty
+                # 处理文本并生成AI响应
                 if text.strip():
                     await process_with_llm(self.websocket, text, self.session_id)
             
             asyncio.run_coroutine_threadsafe(process_and_send_final(), self.loop)
             
-            # Clear the last partial result as we got a final result
+            # 清除部分结果
             self.last_partial_result = ""
         elif not text.strip():
-            logger.info("Empty recognition result - no text found in audio")
+            logger.info("识别结果为空，未检测到文本")
     
-    def _on_canceled(self, evt):
-        """Handle cancellation and errors"""
-        logger.error(f"CANCELED: {evt.result.reason}")
+    def _on_canceled(self, evt) -> None:
+        """处理取消和错误
+        
+        Args:
+            evt: 取消事件对象
+        """
+        logger.error(f"识别已取消: {evt.result.reason}")
+        
         if evt.result.reason == speechsdk.CancellationReason.Error:
             error_details = evt.result.cancellation_details.error_details
-            logger.error(f"Error details: {error_details}")
+            logger.error(f"错误详情: {error_details}")
         
+        # 通知客户端
         if self.websocket and self.loop:
             async def send_error():
-                error_message = "Error: "
+                error_message = "错误: "
                 if evt.result.reason == speechsdk.CancellationReason.Error:
                     error_message += evt.result.cancellation_details.error_details
                 else:
@@ -312,31 +471,35 @@ class AzureStreamingRecognizer:
         
         self.is_recognizing = False
     
-    def _on_session_stopped(self, evt):
-        """Handle session stopped events"""
-        logger.info("Session stopped")
+    def _on_session_stopped(self, evt) -> None:
+        """处理会话停止事件
         
-        # If we have a partial result but no final result was generated,
-        # use the last partial result as a final result
+        Args:
+            evt: 会话停止事件
+        """
+        logger.info("语音识别会话已停止")
+        
+        # 如果有部分结果但没有生成最终结果，则使用部分结果作为最终结果
         if self.websocket and self.loop and self.last_partial_result.strip():
             async def send_final_from_partial():
-                logger.info(f"Using last partial result as final: '{self.last_partial_result}'")
+                logger.info(f"使用最后的部分结果作为最终结果: '{self.last_partial_result}'")
                 
-                # Send the last partial result as a final result
+                # 发送最后的部分结果作为最终结果
                 await self.websocket.send_json({
                     "type": "final_transcript",
                     "content": self.last_partial_result,
                     "session_id": self.session_id
                 })
                 
-                # Process with LLM
+                # 处理响应
                 await process_with_llm(self.websocket, self.last_partial_result, self.session_id)
                 
-                # Clear the last partial result
+                # 清除部分结果
                 self.last_partial_result = ""
             
             asyncio.run_coroutine_threadsafe(send_final_from_partial(), self.loop)
         
+        # 更新客户端状态
         if self.websocket and self.loop:
             async def send_status():
                 await self.websocket.send_json({
@@ -349,26 +512,32 @@ class AzureStreamingRecognizer:
         
         self.is_recognizing = False
     
-    def feed_audio(self, audio_chunk):
-        """Process incoming PCM audio chunk"""
-        if not audio_chunk or len(audio_chunk) == 0:
-            logger.warning("Received empty audio chunk")
-            return
-            
-        # Diagnose audio data
-        self.audio_diagnostics.record_chunk(audio_chunk)
-        self.audio_diagnostics.save_first_chunk(audio_chunk)
+    def feed_audio(self, audio_chunk: bytes) -> None:
+        """处理传入的PCM音频块
         
+        Args:
+            audio_chunk: PCM音频数据
+        """
+        if not audio_chunk or len(audio_chunk) == 0:
+            logger.warning("收到空音频块")
+            return
+        
+        # 音频诊断
+        self.audio_diagnostics.record_chunk(audio_chunk)
+        
+        # 送入语音识别器
         if self.push_stream:
             self.push_stream.write(audio_chunk)
     
-    async def start_continuous_recognition(self):
-        """Start continuous recognition"""
+    async def start_continuous_recognition(self) -> None:
+        """开始连续识别"""
         if self.is_recognizing:
-            logger.info("Recognition already in progress, ignoring start request")
+            logger.info("识别已在进行中，忽略开始请求")
             return
-            
-        logger.info("Starting continuous recognition")
+        
+        logger.info("开始连续识别")
+        
+        # 更新客户端状态
         if self.websocket:
             await self.websocket.send_json({
                 "type": "status",
@@ -376,48 +545,48 @@ class AzureStreamingRecognizer:
                 "session_id": self.session_id
             })
         
-        # Use thread to avoid blocking the event loop with synchronous call
+        # 在线程中启动识别以避免阻塞事件循环
         def start_recognition_thread():
             try:
                 self.recognizer.start_continuous_recognition()
                 self.is_recognizing = True
-                logger.info("Continuous recognition started successfully")
+                logger.info("连续识别成功启动")
             except Exception as e:
-                logger.error(f"Failed to start recognition: {e}")
+                logger.error(f"启动识别失败: {e}")
                 self.is_recognizing = False
                 
-                # Notify about the error
+                # 通知错误
                 if self.websocket and self.loop:
                     async def send_error():
                         await self.websocket.send_json({
                             "type": "error",
-                            "message": f"Recognition start error: {str(e)}",
+                            "message": f"识别启动错误: {str(e)}",
                             "session_id": self.session_id
                         })
                     asyncio.run_coroutine_threadsafe(send_error(), self.loop)
         
-        # Start recognition in a new thread
+        # 启动识别线程
         threading.Thread(target=start_recognition_thread).start()
     
-    async def stop_continuous_recognition(self):
-        """Stop continuous recognition"""
+    async def stop_continuous_recognition(self) -> None:
+        """停止连续识别"""
         if not self.is_recognizing:
-            logger.info("Recognition not active, ignoring stop request")
+            logger.info("识别未在进行中，忽略停止请求")
             return
-            
-        logger.info("Stopping continuous recognition")
         
-        # Use thread to avoid blocking the event loop with synchronous call
+        logger.info("停止连续识别")
+        
+        # 在线程中停止识别
         def stop_recognition_thread():
             try:
                 self.recognizer.stop_continuous_recognition()
-                logger.info("Continuous recognition stopped successfully")
+                logger.info("连续识别成功停止")
             except Exception as e:
-                logger.error(f"Failed to stop recognition: {e}")
+                logger.error(f"停止识别失败: {e}")
             finally:
                 self.is_recognizing = False
                 
-                # Always notify UI that we've stopped regardless of errors
+                # 总是通知UI我们已停止
                 if self.websocket and self.loop:
                     async def send_status():
                         await self.websocket.send_json({
@@ -427,7 +596,7 @@ class AzureStreamingRecognizer:
                         })
                     asyncio.run_coroutine_threadsafe(send_status(), self.loop)
         
-        # Stop recognition in a new thread
+        # 启动停止线程
         threading.Thread(target=stop_recognition_thread).start()
 
 class SimpleAzureTTS:
@@ -439,27 +608,38 @@ class SimpleAzureTTS:
     _sentence_processor_task = None
     _http_client = None  # 共享HTTP客户端
     
-    # 新增：正在处理的任务集合，用于中断
+    # 正在处理的任务集合，用于中断
     active_tasks = set()
     
     @classmethod
-    async def get_http_client(cls):
-        """获取或创建共享HTTP客户端"""
+    async def get_http_client(cls) -> httpx.AsyncClient:
+        """获取或创建共享HTTP客户端
+        
+        Returns:
+            HTTP客户端实例
+        """
         if cls._http_client is None or cls._http_client.is_closed:
             cls._http_client = httpx.AsyncClient(timeout=30.0)
         return cls._http_client
     
-    def __init__(self, subscription_key, region, voice_name=AZURE_TTS_VOICE):
+    def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE):
+        """初始化TTS处理器
+        
+        Args:
+            subscription_key: Azure语音服务订阅密钥
+            region: Azure语音服务区域
+            voice_name: TTS声音名称
+        """
         self.subscription_key = subscription_key
         self.region = region
         self.voice_name = voice_name
         # 使用中国区域的域名
         self.endpoint = f"https://{region}.tts.speech.azure.cn/cognitiveservices/v1"
-        # 不再为每个实例创建HTTP客户端
+        # 发送队列
         self.send_queue = asyncio.Queue()
         self.send_task = None
         self.is_processing = False
-        # 新增：会话ID和中断标记
+        # 会话ID
         self.session_id = None
         
         # 启动全局句子处理器（如果尚未启动）
@@ -470,13 +650,16 @@ class SimpleAzureTTS:
         
         logger.info(f"中国区TTS已初始化，使用声音: {voice_name}，终端: {self.endpoint}")
     
-    # 新增：设置会话ID
-    def set_session_id(self, session_id):
-        """设置此TTS处理器的会话ID"""
+    def set_session_id(self, session_id: str) -> None:
+        """设置此TTS处理器的会话ID
+        
+        Args:
+            session_id: 会话唯一标识符
+        """
         self.session_id = session_id
     
     @classmethod
-    async def _process_sentence_queue(cls):
+    async def _process_sentence_queue(cls) -> None:
         """全局句子队列处理器，确保一次只处理一个句子"""
         try:
             while True:
@@ -521,10 +704,16 @@ class SimpleAzureTTS:
             # 重启处理器
             cls._sentence_processor_task = asyncio.create_task(cls._process_sentence_queue())
     
-    # 新增：中断会话相关的所有TTS任务
     @classmethod
-    async def interrupt_session(cls, session_id):
-        """中断特定会话的所有TTS任务"""
+    async def interrupt_session(cls, session_id: str) -> bool:
+        """中断特定会话的所有TTS任务
+        
+        Args:
+            session_id: 要中断的会话ID
+            
+        Returns:
+            如果有任务被中断，返回True
+        """
         logger.info(f"正在中断会话 {session_id} 的TTS任务")
         
         # 遍历所有活动任务，取消与此会话相关的任务
@@ -538,8 +727,15 @@ class SimpleAzureTTS:
         logger.info(f"会话 {session_id} 的TTS任务中断完成，共取消 {interrupted_tasks} 个任务")
         return interrupted_tasks > 0
     
-    async def synthesize_text_stream(self, text, websocket, session_id, is_first=False):
-        """将文本流式合成为PCM音频并直接发送到客户端"""
+    async def synthesize_text_stream(self, text: str, websocket: WebSocket, session_id: str, is_first: bool = False) -> None:
+        """将文本流式合成为PCM音频并直接发送到客户端
+        
+        Args:
+            text: 要合成的文本
+            websocket: WebSocket连接
+            session_id: 会话ID
+            is_first: 是否是第一个句子
+        """
         if not text or not text.strip():
             logger.warning("TTS收到空文本")
             return
@@ -569,8 +765,15 @@ class SimpleAzureTTS:
         
         logger.info(f"已将句子添加到队列: '{text}'")
     
-    async def _process_single_sentence(self, text, websocket, session_id, is_first):
-        """处理单个句子的TTS合成"""
+    async def _process_single_sentence(self, text: str, websocket: WebSocket, session_id: str, is_first: bool) -> None:
+        """处理单个句子的TTS合成
+        
+        Args:
+            text: 要合成的文本
+            websocket: WebSocket连接
+            session_id: 会话ID
+            is_first: 是否是第一个句子
+        """
         logger.info(f"正在流式合成文本: '{text}'")
         
         # 获取HTTP客户端
@@ -578,7 +781,9 @@ class SimpleAzureTTS:
         
         try:
             # 构建简单的SSML
-            ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN"><voice name="{self.voice_name}">{text}</voice></speak>"""
+            ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+                <voice name="{self.voice_name}">{text}</voice>
+            </speak>"""
             
             # 设置请求头
             headers = {
@@ -613,7 +818,7 @@ class SimpleAzureTTS:
             await self.send_queue.put((0, sentence_start))
             
             try:
-                # 低级别验证SSML
+                # 验证文本长度
                 if len(text) < 1 or len(text) > 1000:
                     logger.warning(f"文本长度异常: {len(text)}字符")
                     
@@ -748,7 +953,7 @@ class SimpleAzureTTS:
                 pass
     
     @classmethod
-    async def close_all(cls):
+    async def close_all(cls) -> None:
         """关闭所有资源"""
         # 关闭HTTP客户端
         if cls._http_client is not None:
@@ -766,8 +971,8 @@ class SimpleAzureTTS:
             except asyncio.CancelledError:
                 pass
     
-    async def close(self):
-        """关闭HTTP客户端和清理资源"""
+    async def close(self) -> None:
+        """关闭资源"""
         # 取消发送任务
         if self.send_task and not self.send_task.done():
             self.send_task.cancel()
@@ -775,11 +980,13 @@ class SimpleAzureTTS:
                 await self.send_task
             except asyncio.CancelledError:
                 pass
-        
-        # 不关闭HTTP客户端，因为它是共享的
     
-    async def _process_send_queue(self, websocket):
-        """处理发送队列中的消息"""
+    async def _process_send_queue(self, websocket: WebSocket) -> None:
+        """处理发送队列中的消息
+        
+        Args:
+            websocket: WebSocket连接
+        """
         self.is_processing = True
         pending_msgs = []
         
@@ -817,9 +1024,6 @@ class SimpleAzureTTS:
                             try:
                                 # 创建包含元数据的二进制头部
                                 # 格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
-                                import struct
-                                import time
-                                
                                 # 生成唯一请求ID (使用句子ID的哈希值)
                                 request_id = hash(message["sentence_id"]) & 0xFFFFFFFF  # 取32位正整数
                                 chunk_number = message["chunk_number"]
@@ -840,10 +1044,8 @@ class SimpleAzureTTS:
                             except Exception as e:
                                 logger.error(f"发送音频数据出错: {e}")
                         else:
-                            # 发送普通JSON消息 (除了二进制音频数据外的消息)
-                            # 不再发送tts_binary_header，因为头部已经合并到二进制数据中
-                            if message["type"] != "tts_binary_header":
-                                await websocket.send_json(message)
+                            # 发送普通JSON消息
+                            await websocket.send_json(message)
                     
                     # 清空已处理消息
                     pending_msgs = []
@@ -868,16 +1070,29 @@ class SimpleAzureTTS:
         finally:
             self.is_processing = False
 
-def split_into_sentences(text):
-    """将文本分成句子"""
+def split_into_sentences(text: str) -> List[str]:
+    """将文本分成句子
+    
+    Args:
+        text: 输入文本
+        
+    Returns:
+        句子列表
+    """
     # 匹配中文和英文常见的句子终止符
     sentence_ends = r'(?<=[。！？.!?;；:：])\s*'
     sentences = re.split(sentence_ends, text)
     # 过滤空句子
     return [s.strip() for s in sentences if s.strip()]
 
-async def process_with_llm(websocket, text, session_id):
-    """使用LLM处理文本，将回复流式转换为语音并发送"""
+async def process_with_llm(websocket: WebSocket, text: str, session_id: str) -> None:
+    """使用LLM处理文本，将回复流式转换为语音并发送
+    
+    Args:
+        websocket: WebSocket连接
+        text: 用户输入文本
+        session_id: 会话ID
+    """
     tts_processor = None
     
     # 获取或创建会话状态
@@ -887,9 +1102,10 @@ async def process_with_llm(websocket, text, session_id):
     session_state = session_states[session_id]
     session_state.clear_interrupt()  # 清除之前的中断标记
     session_state.is_processing_llm = True
+    session_state.update_activity()  # 更新活动时间
     
     try:
-        logger.info(f"Processing with LLM: '{text}'")
+        logger.info(f"使用LLM处理文本: '{text}'")
         
         # 向客户端发送LLM处理状态
         await websocket.send_json({
@@ -898,10 +1114,10 @@ async def process_with_llm(websocket, text, session_id):
             "session_id": session_id
         })
         
-        # 初始化TTS处理器（使用简单中国区版本）
+        # 初始化TTS处理器
         tts_processor = SimpleAzureTTS(
-            subscription_key=AZURE_SPEECH_KEY,
-            region=AZURE_SPEECH_REGION
+            subscription_key=Config.AZURE_SPEECH_KEY,
+            region=Config.AZURE_SPEECH_REGION
         )
         tts_processor.set_session_id(session_id)
         session_state.tts_processor = tts_processor
@@ -919,7 +1135,7 @@ async def process_with_llm(websocket, text, session_id):
             async with async_timeout.timeout(30):
                 # 创建流式回复
                 response_stream = await openai_client.chat.completions.create(
-                    model=OPENAI_MODEL,
+                    model=Config.OPENAI_MODEL,
                     messages=[
                         {"role": "system", "content": "你是一个智能语音助手小蕊，请用口语化、简短的回答客户问题，不要回复任何表情符号"},
                         {"role": "user", "content": text}
@@ -1013,10 +1229,10 @@ async def process_with_llm(websocket, text, session_id):
                     first_sentence_processed = True
                 
         except asyncio.TimeoutError:
-            logger.error("LLM streaming timed out after 30 seconds")
+            logger.error("LLM流式处理超时（30秒）")
             await websocket.send_json({
                 "type": "error",
-                "message": "LLM streaming timed out",
+                "message": "LLM流式处理超时",
                 "session_id": session_id
             })
         
@@ -1030,29 +1246,29 @@ async def process_with_llm(websocket, text, session_id):
             })
             
             # 记录历史
-            logger.info(f"LLM response complete: '{collected_response}'")
+            logger.info(f"LLM响应完成: '{collected_response}'")
         elif session_state.is_interrupted():
-            logger.info("LLM processing was interrupted")
+            logger.info("LLM处理被中断")
             await websocket.send_json({
                 "type": "llm_response",
                 "content": "对话被中断",
-                "is_complete": true,
-                "was_interrupted": true,
+                "is_complete": True,
+                "was_interrupted": True,
                 "session_id": session_id
             })
         else:
-            logger.warning("No LLM response was collected")
+            logger.warning("未收集到任何LLM响应")
             await websocket.send_json({
                 "type": "error",
-                "message": "LLM did not generate any response",
+                "message": "LLM未生成任何响应",
                 "session_id": session_id
             })
         
     except Exception as e:
-        logger.error(f"Error processing with LLM: {e}")
+        logger.error(f"LLM处理错误: {e}")
         await websocket.send_json({
             "type": "error",
-            "message": f"LLM error: {str(e)}",
+            "message": f"LLM错误: {str(e)}",
             "session_id": session_id
         })
     finally:
@@ -1061,115 +1277,57 @@ async def process_with_llm(websocket, text, session_id):
         session_state.is_tts_active = False
         session_state.response_stream = None
 
-# 添加语音活动检测工具类
-class VoiceActivityDetector:
-    def __init__(self):
-        self.energy_threshold = 0.01  # 能量阈值，可以根据环境调整
-        self.frame_count = 0
-        self.voice_frames = 0
-        self.reset_interval = 20  # 每隔多少帧重置计数
-        
-    def reset(self):
-        """重置检测器状态"""
-        self.frame_count = 0
-        self.voice_frames = 0
-        
-    def detect(self, audio_chunk):
-        """检测音频块中是否包含语音"""
-        if not audio_chunk or len(audio_chunk) < 10:
-            return False
-            
-        # 只检查每隔一定数量的帧
-        self.frame_count += 1
-        if self.frame_count > self.reset_interval:
-            self.reset()
-            
-        try:
-            # 计算音频能量 - 使用安全的方法处理任意大小的缓冲区
-            try:
-                # 确保只处理缓冲区的可用部分
-                max_samples = min(50, len(audio_chunk) // 2)  # 最多处理50个样本
-                if max_samples <= 0:
-                    return False
-                
-                # 创建合适大小的Int16Array
-                pcm_samples = []
-                for i in range(max_samples):
-                    if i*2+1 < len(audio_chunk):
-                        # 手动解析2字节为一个16位整数
-                        value = int.from_bytes(audio_chunk[i*2:i*2+2], byteorder='little', signed=True)
-                        pcm_samples.append(value)
-                
-                if not pcm_samples:
-                    return False
-                
-                # 计算平均能量
-                energy = sum(abs(sample) for sample in pcm_samples) / len(pcm_samples)
-                
-                # 归一化能量值 (16位PCM范围是-32768到32767)
-                normalized_energy = energy / 32768.0
-                
-                # 判断是否超过阈值
-                if normalized_energy > self.energy_threshold:
-                    self.voice_frames += 1
-                    return True
-            except Exception as e:
-                logger.debug(f"语音采样处理错误: {e}")
-                return False
-        except Exception as e:
-            logger.debug(f"语音检测错误: {e}")
-            
-        return False
-        
-    def has_continuous_voice(self):
-        """判断是否检测到连续的语音帧"""
-        # 如果连续的语音帧数超过一定比例，认为有持续语音
-        return self.voice_frames > (self.reset_interval * 0.3)
-
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    """WebSocket连接终端点
+    
+    处理与客户端的实时通信
+    
+    Args:
+        websocket: WebSocket连接
+    """
     await websocket.accept()
     
-    # Get current event loop for the async operation
+    # 获取当前事件循环
     loop = asyncio.get_running_loop()
     
-    # Generate a unique session ID
+    # 生成唯一会话ID
     session_id = str(uuid.uuid4())
     session_states[session_id] = SessionState(session_id)
     
     # 创建语音活动检测器
     voice_detector = VoiceActivityDetector()
     
-    # Initialize Azure recognizer
+    # 初始化Azure识别器
     recognizer = AzureStreamingRecognizer(
-        subscription_key=AZURE_SPEECH_KEY,
-        region=AZURE_SPEECH_REGION,
-        language="zh-CN"
+        subscription_key=Config.AZURE_SPEECH_KEY,
+        region=Config.AZURE_SPEECH_REGION,
+        language=Config.ASR_LANGUAGE
     )
     
     recognizer.set_websocket(websocket, loop)
     recognizer.setup_handlers()
     
     try:
-        # Start recognition
+        # 开始识别
         await recognizer.start_continuous_recognition()
         
-        # Process incoming audio data
+        # 处理传入的音频数据
         while True:
             data = await websocket.receive()
             
             if "bytes" in data:
-                # Process binary audio data
+                # 处理二进制音频数据
                 audio_data = data["bytes"]
                 if audio_data:
-                    # 先进行简单的验证
+                    # 进行简单验证
                     if len(audio_data) < 2:  # 至少需要一个16位样本
                         continue
                         
                     # 检测是否有语音活动
                     has_voice = voice_detector.detect(audio_data)
                     
-                    # 新增：检查是否有正在进行的TTS响应，如果有则发送打断信令
+                    # 检查是否有正在进行的TTS响应，如果有则发送打断信令
                     session_state = session_states.get(session_id)
                     if has_voice and session_state and (session_state.is_tts_active or session_state.is_processing_llm):
                         # 只有当检测到显著的语音活动时才发送打断信令
@@ -1194,10 +1352,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     # 继续处理音频
                     recognizer.feed_audio(audio_data)
                 else:
-                    logger.warning("Received empty audio data")
+                    logger.warning("收到空音频数据")
             
             elif "text" in data:
-                # Process text commands
+                # 处理文本命令
                 try:
                     message = json.loads(data["text"])
                     cmd_type = message.get("type")
@@ -1209,20 +1367,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     elif cmd_type == "reset":
                         await recognizer.stop_continuous_recognition()
                         
-                        # Wait a bit to ensure previous session is fully stopped
+                        # 等待一段时间确保前一个会话完全停止
                         await asyncio.sleep(1)
                         
-                        # Create new recognizer instance
+                        # 创建新的识别器实例
                         recognizer = AzureStreamingRecognizer(
-                            subscription_key=AZURE_SPEECH_KEY,
-                            region=AZURE_SPEECH_REGION,
-                            language="zh-CN"
+                            subscription_key=Config.AZURE_SPEECH_KEY,
+                            region=Config.AZURE_SPEECH_REGION,
+                            language=Config.ASR_LANGUAGE
                         )
                         recognizer.set_websocket(websocket, loop)
                         recognizer.setup_handlers()
                         await recognizer.start_continuous_recognition()
                     elif cmd_type == "interrupt":
-                        # 新增：处理中断命令
+                        # 处理中断命令
                         logger.info(f"接收到中断命令，会话ID: {session_id}")
                         
                         # 获取会话状态
@@ -1241,14 +1399,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             })
                         
                 except Exception as e:
-                    logger.error(f"Error processing command: {e}")
+                    logger.error(f"处理命令错误: {e}")
                     await websocket.send_json({
                         "type": "error",
-                        "message": f"Command error: {str(e)}"
+                        "message": f"命令错误: {str(e)}"
                     })
     
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        logger.info("WebSocket断开连接")
         await recognizer.stop_continuous_recognition()
         # 关闭所有TTS资源
         await SimpleAzureTTS.close_all()
@@ -1256,11 +1414,11 @@ async def websocket_endpoint(websocket: WebSocket):
         if session_id in session_states:
             del session_states[session_id]
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket错误: {e}")
         try:
             await websocket.send_json({
                 "type": "error",
-                "message": f"WebSocket error: {str(e)}"
+                "message": f"WebSocket错误: {str(e)}"
             })
         except:
             pass
@@ -1271,13 +1429,68 @@ async def websocket_endpoint(websocket: WebSocket):
         if session_id in session_states:
             del session_states[session_id]
 
-# Serve static files
+# 定期清理不活跃的会话
+@app.on_event("startup")
+async def start_session_cleanup() -> None:
+    """启动时开始会话清理任务"""
+    asyncio.create_task(cleanup_inactive_sessions())
+
+async def cleanup_inactive_sessions() -> None:
+    """定期清理不活跃的会话"""
+    while True:
+        try:
+            # 查找并清理不活跃的会话
+            inactive_session_ids = []
+            for session_id, state in session_states.items():
+                if state.is_inactive(timeout_seconds=600):  # 10分钟无活动
+                    inactive_session_ids.append(session_id)
+            
+            # 清理不活跃的会话
+            for session_id in inactive_session_ids:
+                logger.info(f"清理不活跃会话: {session_id}")
+                # 尝试中断任何活动的处理
+                try:
+                    await SimpleAzureTTS.interrupt_session(session_id)
+                except:
+                    pass
+                # 删除会话状态
+                if session_id in session_states:
+                    del session_states[session_id]
+            
+            # 每分钟检查一次
+            await asyncio.sleep(60)
+        except Exception as e:
+            logger.error(f"会话清理错误: {e}")
+            await asyncio.sleep(60)  # 发生错误时，等待一分钟后重试
+
+# 服务静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
-async def get_root():
-    with open("static/index.html", "r") as f:
+async def get_root() -> str:
+    """返回主页HTML
+    
+    Returns:
+        HTML文本
+    """
+    with open("static/index.html", "r", encoding="utf-8") as f:
         return f.read()
+
+# 添加应用健康检查端点
+@app.get("/health")
+async def health_check() -> dict:
+    """健康检查端点
+    
+    Returns:
+        健康状态信息
+    """
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "session_count": len(session_states),
+        "azure_speech_configured": bool(Config.AZURE_SPEECH_KEY and Config.AZURE_SPEECH_REGION),
+        "openai_configured": bool(Config.OPENAI_API_KEY)
+    }
 
 if __name__ == "__main__":
     import uvicorn
