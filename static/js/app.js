@@ -14,7 +14,6 @@ let resampleRequired = false;
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
 const resetBtn = document.getElementById('reset-btn');
-const partialTranscript = document.getElementById('partial-transcript');
 const messages = document.getElementById('messages');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
@@ -161,7 +160,6 @@ function resetSession() {
     window.AudioProcessor.stopAudioPlayback();
     
     // 清空显示
-    partialTranscript.textContent = '';
     messages.innerHTML = '';
     
     // 发送重置命令
@@ -200,9 +198,7 @@ function setupEventListeners() {
     
     // 添加被动事件监听器以提高性能
     if (messages) {
-        messages.addEventListener('scroll', function() {
-            // 处理滚动事件
-        }, { passive: true });
+        messages.addEventListener('scroll', function() {}, { passive: true });
     }
     
     // 处理页面卸载

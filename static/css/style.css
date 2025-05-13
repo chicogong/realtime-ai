@@ -17,6 +17,7 @@ body {
     align-items: center;
 }
 
+/* Status styling */
 .status-container {
     margin-bottom: 20px;
     text-align: center;
@@ -27,18 +28,39 @@ body {
     color: #666;
 }
 
-.status.listening {
-    color: #2ecc71;
+.status.listening { color: #2ecc71; }
+.status.thinking { color: #3498db; }
+.status.error { color: #e74c3c; }
+
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
 }
 
-.status.thinking {
-    color: #3498db;
+.status-dot.listening {
+    background-color: #2ecc71;
+    box-shadow: 0 0 5px #2ecc71;
+    animation: pulse 1.5s infinite;
 }
 
-.status.error {
-    color: #e74c3c;
+.status-dot.thinking {
+    background-color: #3498db;
+    box-shadow: 0 0 5px #3498db;
+    animation: pulse 1.5s infinite;
 }
 
+.status-dot.idle {
+    background-color: #95a5a6;
+}
+
+.status-dot.error {
+    background-color: #e74c3c;
+}
+
+/* Controls styling */
 .controls {
     margin-top: 20px;
     display: flex;
@@ -73,6 +95,7 @@ button.stop:hover {
     background-color: #c0392b;
 }
 
+/* Chat container styling */
 .chat-container {
     width: 100%;
     height: 400px;
@@ -92,23 +115,7 @@ button.stop:hover {
     flex-direction: column;
 }
 
-.input-area {
-    display: flex;
-    border-top: 1px solid #eee;
-    padding: 10px;
-}
-
-.partial-transcript {
-    width: 100%;
-    min-height: 20px;
-    font-style: italic;
-    color: #7f8c8d;
-    font-size: 0.9em;
-    padding: 5px;
-    border-radius: 4px;
-    background-color: rgba(236, 240, 241, 0.5);
-}
-
+/* Message styling */
 .message {
     margin-bottom: 15px;
     padding: 10px 15px;
@@ -120,8 +127,19 @@ button.stop:hover {
     word-wrap: break-word;
     position: relative;
     box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    transition: max-width 0.3s ease;
 }
 
+.message:empty, 
+.message:only-child {
+    min-width: 40px;
+}
+
+.message-long { max-width: 80%; }
+.message-medium { max-width: 60%; }
+.message-short { max-width: 40%; }
+
+/* User message styling */
 .user-message {
     background-color: #3498db;
     color: white;
@@ -138,6 +156,7 @@ button.stop:hover {
     background: radial-gradient(circle at top right, transparent 16px, #3498db 0);
 }
 
+/* AI message styling */
 .ai-message {
     background-color: #f1f1f1;
     color: #333;
@@ -154,6 +173,7 @@ button.stop:hover {
     background: radial-gradient(circle at top left, transparent 16px, #f1f1f1 0);
 }
 
+/* Streaming message styling */
 .stream-message {
     position: relative;
     min-height: 20px;
@@ -174,37 +194,7 @@ button.stop:hover {
     background: radial-gradient(circle at top left, transparent 16px, #f1f1f1 0);
 }
 
-/* Short messages should have a minimum width */
-.message:empty, 
-.message:only-child {
-    min-width: 40px;
-}
-
-/* Long messages should wrap */
-.message-long {
-    max-width: 80%;
-}
-
-/* Medium messages should be sized appropriately */
-.message-medium {
-    max-width: 60%;
-}
-
-/* Short messages should be compact */
-.message-short {
-    max-width: 40%;
-}
-
-/* Message animations and transitions */
-.message {
-    transition: max-width 0.3s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0.7; }
-    to { opacity: 1; }
-}
-
+/* Typing indicator */
 .typing-indicator {
     display: inline-block;
     vertical-align: middle;
@@ -229,32 +219,10 @@ button.stop:hover {
     animation-delay: 0.4s;
 }
 
-.status-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 5px;
-}
-
-.status-dot.listening {
-    background-color: #2ecc71;
-    box-shadow: 0 0 5px #2ecc71;
-    animation: pulse 1.5s infinite;
-}
-
-.status-dot.thinking {
-    background-color: #3498db;
-    box-shadow: 0 0 5px #3498db;
-    animation: pulse 1.5s infinite;
-}
-
-.status-dot.idle {
-    background-color: #95a5a6;
-}
-
-.status-dot.error {
-    background-color: #e74c3c;
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0.7; }
+    to { opacity: 1; }
 }
 
 @keyframes pulse {

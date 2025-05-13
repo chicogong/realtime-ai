@@ -9,13 +9,11 @@ const SAMPLE_SIZE = 16;
 const CHANNELS = 1;
 const BUFFER_SIZE = 4096;
 
-// 音频相关变量 - 仅保留此模块专用的变量
+// 音频相关变量
 let audioContext = null;
-// 移除 mediaStream 和 processor，由app.js管理
 let isPlayingAudio = false;
 let currentAudioSource = null;
 let audioBufferQueue = [];
-// 移除 originalSampleRate 和 resampleRequired，由app.js管理
 
 /**
  * 初始化音频上下文
@@ -147,7 +145,6 @@ async function pcmToAudioBuffer(pcmData) {
     }
     
     try {
-        // 检查PCM数据是否有效
         if (!pcmData || pcmData.byteLength === 0) {
             console.warn('PCM数据无效');
             return null;
@@ -168,12 +165,10 @@ async function pcmToAudioBuffer(pcmData) {
         // 获取音频通道数据
         const tempChannelData = tempBuffer.getChannelData(0);
         
-        // 将PCM数据转换为Float32Array，确保处理小端字节序
+        // 将PCM数据转换为Float32Array
         const dataView = new DataView(pcmData);
         for (let i = 0; i < tempChannelData.length; i++) {
-            // 使用getInt16显式指定小端字节序(true)，避免字节序问题
             const int16Value = dataView.getInt16(i * 2, true);
-            // 16位PCM范围是-32768到32767，转换到-1.0到1.0
             tempChannelData[i] = int16Value / 32768.0;
         }
         
@@ -186,17 +181,15 @@ async function pcmToAudioBuffer(pcmData) {
             const targetBuffer = audioContext.createBuffer(1, targetSampleCount, contextRate);
             const targetChannelData = targetBuffer.getChannelData(0);
             
-            // 简单线性内插重采样
+            // 线性内插重采样
             for (let i = 0; i < targetSampleCount; i++) {
                 const sourcePos = i * sourceRate / contextRate;
                 const sourcePosFloor = Math.floor(sourcePos);
                 const fraction = sourcePos - sourcePosFloor;
                 
-                // 确保不越界
                 if (sourcePosFloor < tempChannelData.length - 1) {
                     const a = tempChannelData[sourcePosFloor];
                     const b = tempChannelData[sourcePosFloor + 1];
-                    // 线性插值
                     targetChannelData[i] = a + fraction * (b - a);
                 } else if (sourcePosFloor < tempChannelData.length) {
                     targetChannelData[i] = tempChannelData[sourcePosFloor];
@@ -206,7 +199,6 @@ async function pcmToAudioBuffer(pcmData) {
             return targetBuffer;
         }
         
-        // 如果不需要重采样，直接返回原始buffer
         return tempBuffer;
     } catch (e) {
         console.error('PCM转换失败:', e);
@@ -286,32 +278,26 @@ function detectAudioLevel(audioBuffer) {
  */
 async function handleBinaryAudioData(blob) {
     try {
-        // 确保音频上下文已初始化
         initAudioContext();
         
-        // 解析二进制数据
         const arrayBuffer = await blob.arrayBuffer();
         
-        // 检查数据大小
         if (arrayBuffer.byteLength < 12) {
             console.error('收到的二进制数据太小，无法解析头部');
             return;
         }
         
         // 解析头部信息
-        // 格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
         const headerView = new DataView(arrayBuffer, 0, 12);
-        const requestId = headerView.getUint32(0, true);  // 使用小端字节序
+        const requestId = headerView.getUint32(0, true);
         const chunkNumber = headerView.getUint32(4, true);
         const timestamp = headerView.getUint32(8, true);
         
         // 提取PCM数据
         const pcmData = arrayBuffer.slice(12);
         
-        // 打印日志
         console.log(`处理音频块: ID=${requestId}, 块号=${chunkNumber}, 时间戳=${timestamp}, PCM大小=${pcmData.byteLength}字节`);
         
-        // 播放PCM数据
         playAudio(pcmData);
     } catch (e) {
         console.error('处理二进制音频数据出错:', e);

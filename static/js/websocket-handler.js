@@ -7,9 +7,6 @@
 let socket = null;
 let isAIResponding = false;
 
-// 移除DOM元素的全局引用
-// let partialTranscript, messages, statusDot, statusText;
-
 /**
  * 初始化WebSocket连接
  * @param {Function} updateStatus - 更新状态的回调函数
@@ -76,12 +73,11 @@ function initializeWebSocket(updateStatus, startBtn) {
  * @param {Function} updateStatus - 更新状态的回调函数
  */
 function handleSocketMessage(data, updateStatus) {
-    // 使用DOM选择器直接获取元素而不是使用全局变量
+    // 使用DOM选择器直接获取元素
     const messages = document.getElementById('messages');
 
     switch (data.type) {
         case 'partial_transcript':
-            // 获取当前的部分识别结果
             if (data.content.trim()) {
                 // 检查是否已有当前用户气泡
                 const userBubble = document.getElementById('current-user-bubble');
@@ -91,7 +87,6 @@ function handleSocketMessage(data, updateStatus) {
                     userBubble.textContent = data.content;
                 } else {
                     // 创建新的用户消息气泡
-                    const messages = document.getElementById('messages');
                     if (messages) {
                         // 创建消息包装容器
                         const messageWrapper = document.createElement('div');
@@ -153,7 +148,7 @@ function handleSocketMessage(data, updateStatus) {
                         existingContainer.remove();
                     }
                     
-                    // 创建消息包装容器（为了正确定位）
+                    // 创建消息包装容器
                     const messageWrapper = document.createElement('div');
                     messageWrapper.style.display = 'flex';
                     messageWrapper.style.justifyContent = 'flex-start';
@@ -291,7 +286,7 @@ function addMessage(text, type) {
     const messages = document.getElementById('messages');
     if (!messages) return;
     
-    // 创建消息包装容器（为了正确定位）
+    // 创建消息包装容器
     const messageWrapper = document.createElement('div');
     messageWrapper.style.display = 'flex';
     messageWrapper.style.justifyContent = type === 'user' ? 'flex-end' : 'flex-start';
