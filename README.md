@@ -118,6 +118,8 @@ headerView.setUint32(4, statusFlags, true); // 小端序
   - Coqui XTTS (高质量本地)
   - Kokoro (轻量级)
   - Orpheus (另一选项)
+  - Azure TTS (微软云服务)
+  - MiniMax TTS (流式TTS服务)
 - **处理模式**: 流式生成和播放
 - **延迟优化**: 提前开始合成
 - **语音定制**: 可切换声音和语速

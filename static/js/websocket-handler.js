@@ -53,8 +53,10 @@ window.WebSocketHandler = {
         try {
             if (typeof event.data === 'string') {
                 const data = JSON.parse(event.data);
+                console.log('收到WebSocket消息:', data.type, data);
                 this.handleMessage(data, updateStatus);
             } else if (event.data instanceof Blob) {
+                console.log('收到二进制数据:', event.data.size, '字节');
                 window.AudioProcessor.handleBinaryAudioData(event.data);
             }
         } catch (e) {
@@ -82,6 +84,14 @@ window.WebSocketHandler = {
             case 'llm_response':
                 this._handleLLMResponse(data, updateStatus, messages);
                 break;
+                
+            case 'audio_start':
+                console.log('开始播放音频, 格式:', data.format);
+                break;
+                
+            case 'audio_end':
+                console.log('音频播放结束');
+                break;
             
             case 'tts_sentence_start':
             case 'tts_sentence_end':
@@ -97,10 +107,14 @@ window.WebSocketHandler = {
                 break;
                 
             case 'error':
-                console.log(`收到消息: ${data.type}`, data);
+                console.error(`收到错误消息:`, data);
                 if (data.type === 'error') {
                     updateStatus('error', data.message || '发生错误');
                 }
+                break;
+                
+            default:
+                console.log(`未处理的消息类型: ${data.type}`, data);
                 break;
         }
     },

@@ -125,22 +125,31 @@ window.AudioProcessor = {
     // 将PCM数据转换为AudioBuffer
     async pcmToAudioBuffer(pcmData) {
         if (!this.initAudioContext() || !pcmData || pcmData.byteLength === 0) {
+            console.warn('无效的PCM数据或音频上下文未初始化');
             return null;
         }
+        
+        console.log(`开始PCM转换: 数据大小=${pcmData.byteLength}字节`);
         
         try {
             // 检查是否为有效的PCM数据大小（必须是偶数字节）
             if (pcmData.byteLength % 2 !== 0) {
-                console.warn('PCM数据大小不正确（非偶数字节）');
+                console.warn(`PCM数据大小不正确（非偶数字节）: ${pcmData.byteLength}字节`);
                 // 截断为偶数字节
                 pcmData = pcmData.slice(0, pcmData.byteLength - 1);
-                if (pcmData.byteLength === 0) return null;
+                console.log(`调整后PCM数据大小: ${pcmData.byteLength}字节`);
+                if (pcmData.byteLength === 0) {
+                    console.error('调整后PCM数据为空');
+                    return null;
+                }
             }
             
             // 获取采样率信息
             const contextRate = audioContext.sampleRate;
-            const sourceRate = SAMPLE_RATE;
+            const sourceRate = SAMPLE_RATE; // 16000Hz
             const needsResampling = contextRate !== sourceRate;
+            
+            console.log(`PCM转换: 原始采样率=${sourceRate}Hz, 目标采样率=${contextRate}Hz, 数据大小=${pcmData.byteLength}字节, 需要重采样=${needsResampling}, 样本数=${pcmData.byteLength/2}`);
             
             // 创建临时AudioBuffer
             const sampleCount = pcmData.byteLength / 2;  // 16位PCM，每样本2字节
@@ -155,58 +164,55 @@ window.AudioProcessor = {
             
             // 将PCM数据转换为Float32Array
             const dataView = new DataView(pcmData);
+            let maxAmp = 0;
+            let minAmp = 0;
+            
             for (let i = 0; i < sampleCount; i++) {
                 try {
                     // 使用小端序，因为服务器使用小端序（true）
                     const int16Value = dataView.getInt16(i * 2, true);
                     // 标准化到 -1.0 到 1.0 范围
-                    tempChannelData[i] = int16Value / 32768.0;
+                    const normVal = int16Value / 32768.0;
+                    tempChannelData[i] = normVal;
+                    
+                    // 跟踪音频电平
+                    maxAmp = Math.max(maxAmp, normVal);
+                    minAmp = Math.min(minAmp, normVal);
                 } catch (e) {
-                    console.error(`PCM数据处理错误，索引: ${i}, 总长度: ${pcmData.byteLength}`);
+                    console.error(`PCM数据处理错误，索引: ${i}, 总长度: ${pcmData.byteLength}`, e);
                     break;
                 }
             }
             
+            console.log(`PCM数据解析完成: 最大振幅=${maxAmp.toFixed(4)}, 最小振幅=${minAmp.toFixed(4)}`);
+            
             // 如果需要重采样
             if (needsResampling) {
-                // 创建目标AudioBuffer
-                const targetSampleCount = Math.round(tempChannelData.length * contextRate / sourceRate);
-                const targetBuffer = audioContext.createBuffer(1, targetSampleCount, contextRate);
-                const targetChannelData = targetBuffer.getChannelData(0);
+                console.log(`执行PCM重采样: ${sourceRate}Hz -> ${contextRate}Hz, 样本数: ${sampleCount} -> 约${Math.round(sampleCount * contextRate / sourceRate)}`);
                 
-                // 使用更高质量的立方插值重采样
-                for (let i = 0; i < targetSampleCount; i++) {
-                    const sourcePos = i * sourceRate / contextRate;
-                    const sourcePosFloor = Math.floor(sourcePos);
-                    const fraction = sourcePos - sourcePosFloor;
-                    
-                    if (sourcePosFloor > 0 && sourcePosFloor < tempChannelData.length - 2) {
-                        // 立方插值，使用四个点
-                        const y0 = tempChannelData[sourcePosFloor - 1];
-                        const y1 = tempChannelData[sourcePosFloor];
-                        const y2 = tempChannelData[sourcePosFloor + 1];
-                        const y3 = tempChannelData[sourcePosFloor + 2];
-                        
-                        // 立方Hermite插值公式
-                        const c0 = y1;
-                        const c1 = 0.5 * (y2 - y0);
-                        const c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3;
-                        const c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
-                        
-                        targetChannelData[i] = ((c3 * fraction + c2) * fraction + c1) * fraction + c0;
-                    } else if (sourcePosFloor < tempChannelData.length - 1) {
-                        // 退回到线性插值
-                        const a = tempChannelData[sourcePosFloor];
-                        const b = tempChannelData[sourcePosFloor + 1];
-                        targetChannelData[i] = a + fraction * (b - a);
-                    } else if (sourcePosFloor < tempChannelData.length) {
-                        targetChannelData[i] = tempChannelData[sourcePosFloor] || 0;
-                    }
+                // 创建OfflineAudioContext做重采样
+                const offlineContext = new OfflineAudioContext(1, Math.ceil(tempChannelData.length * contextRate / sourceRate), contextRate);
+                
+                // 创建BufferSource
+                const source = offlineContext.createBufferSource();
+                source.buffer = tempBuffer;
+                source.connect(offlineContext.destination);
+                source.start();
+                
+                // 执行重采样
+                try {
+                    console.time('重采样耗时');
+                    const renderedBuffer = await offlineContext.startRendering();
+                    console.timeEnd('重采样耗时');
+                    console.log(`重采样完成: 新样本数=${renderedBuffer.length}, 持续时间=${renderedBuffer.duration.toFixed(2)}秒`);
+                    return renderedBuffer;
+                } catch (e) {
+                    console.error('重采样失败, 使用原始缓冲区', e);
+                    return tempBuffer;
                 }
-                
-                return targetBuffer;
             }
             
+            console.log(`PCM转换完成: 样本数=${tempBuffer.length}, 持续时间=${tempBuffer.duration.toFixed(2)}秒`);
             return tempBuffer;
         } catch (e) {
             console.error('PCM转换失败:', e);
@@ -276,36 +282,63 @@ window.AudioProcessor = {
         try {
             const arrayBuffer = await blob.arrayBuffer();
             
-            // 跳过12字节的头部信息 (请求ID 4字节 + 块序号 4字节 + 时间戳 4字节)
-            const headerSize = 12;
-            if (arrayBuffer.byteLength <= headerSize) {
-                console.warn('收到的音频数据过小，无法处理');
+            // 检查数据大小
+            if (arrayBuffer.byteLength <= 0) {
+                console.warn('收到的音频数据为空，无法处理');
                 return;
             }
             
-            // 解析头部信息
-            const headerView = new DataView(arrayBuffer, 0, headerSize);
-            const requestId = headerView.getUint32(0, true); // 小端序
-            const chunkNumber = headerView.getUint32(4, true);
-            const timestamp = headerView.getUint32(8, true);
+            console.log('处理音频数据，总大小:', arrayBuffer.byteLength, '字节');
             
-            // 仅显示首个块的日志
-            if (chunkNumber === 1) {
-                console.log(`收到音频: 请求ID=${requestId}, 块=${chunkNumber}, 时间戳=${timestamp}, 数据大小=${arrayBuffer.byteLength - headerSize}字节`);
-            }
-            
-            // 提取PCM音频数据，确保对齐到2字节边界（16位PCM）
-            let audioData = arrayBuffer.slice(headerSize);
-            
-            // 确保音频数据的大小是偶数字节（16位PCM需要）
-            if (audioData.byteLength % 2 !== 0) {
-                console.warn('音频数据大小不正确（非偶数字节），将进行调整');
-                audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
-            }
-            
-            // 如果有有效数据，则播放
-            if (audioData.byteLength > 0) {
-                this.playAudio(audioData);
+            // 检查是否有头部信息
+            if (arrayBuffer.byteLength >= 12) {
+                // 带头部的格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
+                const headerView = new DataView(arrayBuffer, 0, 12);
+                const requestId = headerView.getUint32(0, true); // 小端序
+                const chunkNumber = headerView.getUint32(4, true);
+                const timestamp = headerView.getUint32(8, true);
+                
+                // 仅显示首个块的日志
+                if (chunkNumber === 1) {
+                    console.log(`收到音频块: 请求ID=${requestId}, 块=${chunkNumber}, 时间戳=${timestamp}, 数据大小=${arrayBuffer.byteLength - 12}字节`);
+                }
+                
+                // 提取PCM音频数据，从12字节开始
+                let audioData = arrayBuffer.slice(12);
+                
+                // 确保音频数据的大小是偶数字节（16位PCM需要）
+                if (audioData.byteLength % 2 !== 0) {
+                    console.warn('音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
+                    audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
+                    console.log('调整后音频数据大小:', audioData.byteLength, '字节');
+                }
+                
+                // 如果有有效数据，则播放
+                if (audioData.byteLength > 0) {
+                    console.log(`播放音频块: ${audioData.byteLength}字节`);
+                    this.playAudio(audioData);
+                } else {
+                    console.warn('处理后音频数据为空，跳过播放');
+                }
+            } else {
+                // 可能是直接的PCM格式（没有头部信息）
+                console.log('收到直接PCM音频数据，大小:', arrayBuffer.byteLength, '字节');
+                
+                // 确保音频数据的大小是偶数字节（16位PCM需要）
+                let audioData = arrayBuffer;
+                if (audioData.byteLength % 2 !== 0) {
+                    console.warn('直接PCM音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
+                    audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
+                    console.log('调整后直接PCM音频数据大小:', audioData.byteLength, '字节');
+                }
+                
+                // 播放音频
+                if (audioData.byteLength > 0) {
+                    console.log(`播放直接PCM音频: ${audioData.byteLength}字节`);
+                    this.playAudio(audioData);
+                } else {
+                    console.warn('处理后直接PCM音频数据为空，跳过播放');
+                }
             }
         } catch (e) {
             console.error('处理音频数据错误:', e);

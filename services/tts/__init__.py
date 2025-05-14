@@ -4,6 +4,7 @@ from loguru import logger
 from config import Config
 from services.tts.base import BaseTTSService
 from services.tts.azure_tts import AzureTTSService
+from services.tts.minimax_tts import MiniMaxTTSService
 
 def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSService]:
     """创建TTS服务实例
@@ -23,6 +24,12 @@ def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSServ
                 subscription_key=Config.AZURE_SPEECH_KEY,
                 region=Config.AZURE_SPEECH_REGION,
                 voice_name=Config.AZURE_TTS_VOICE
+            )
+        elif Config.TTS_PROVIDER == "minimax":
+            logger.info("创建MiniMax TTS服务")
+            tts_service = MiniMaxTTSService(
+                api_key=Config.MINIMAX_API_KEY,
+                voice_id=Config.MINIMAX_VOICE_ID
             )
         # 未来可以在这里添加其他TTS提供商的支持
         # elif Config.TTS_PROVIDER == "other_provider":
@@ -44,4 +51,6 @@ async def close_all_tts_services() -> None:
     """关闭所有TTS服务资源"""
     if Config.TTS_PROVIDER == "azure":
         await AzureTTSService.close_all()
+    elif Config.TTS_PROVIDER == "minimax":
+        await MiniMaxTTSService.close_all()
     # 未来可以在这里添加其他TTS提供商的清理代码

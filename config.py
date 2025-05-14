@@ -10,12 +10,16 @@ class Config:
     # 服务提供商选择
     ASR_PROVIDER = os.getenv("ASR_PROVIDER", "azure")  # 支持: azure, (未来其他提供商)
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # 支持: openai, (未来其他提供商)
-    TTS_PROVIDER = os.getenv("TTS_PROVIDER", "azure")  # 支持: azure, (未来其他提供商)
+    TTS_PROVIDER = os.getenv("TTS_PROVIDER", "azure")  # 支持: azure, minimax, (未来其他提供商)
     
     # Azure 语音服务配置
     AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
     AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
     AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+    
+    # MiniMax TTS配置
+    MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
+    MINIMAX_VOICE_ID = os.getenv("MINIMAX_VOICE_ID", "male-qn-qingse")  # 默认使用青涩音色
     
     # OpenAI API配置
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -59,6 +63,11 @@ class Config:
             if not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION:
                 logger.error("Azure Speech凭据缺失，需设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION")
                 return False
+        elif cls.TTS_PROVIDER == "minimax":
+            if not cls.MINIMAX_API_KEY:
+                logger.error("MiniMax API密钥缺失，需设置MINIMAX_API_KEY")
+                return False
+            logger.info(f"MiniMax TTS语音ID: {cls.MINIMAX_VOICE_ID}")
         
         logger.info("配置验证通过")
         return True
