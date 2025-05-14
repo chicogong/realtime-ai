@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>AI对话</h1>
+            <h1>实时AI对话</h1>
             <div class="status">
                 <span id="status-dot"></span>
                 <span id="status-text">准备就绪</span>
@@ -20,13 +20,13 @@
             <div id="messages"></div>
         </main>
         
-        <footer class="controls">
-            <button id="start-btn">开始</button>
-            <button id="stop-btn" disabled>停止</button>
-            <button id="reset-btn">重置</button>
+        <footer>
+            <button id="start-btn" class="action-btn primary-btn">开始对话</button>
+            <button id="stop-btn" class="action-btn stop-btn" disabled>停止</button>
+            <button id="reset-btn" class="action-btn reset-btn">重置</button>
         </footer>
     </div>
-    
+
     <script src="/static/js/audio-processor.js"></script>
     <script src="/static/js/websocket-handler.js"></script>
     <script src="/static/js/app.js"></script>
