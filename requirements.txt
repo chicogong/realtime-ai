@@ -5,4 +5,5 @@ azure-cognitiveservices-speech>=1.31.0
 httpx>=0.25.2
 openai>=1.11.0
 async-timeout>=4.0.3
-websockets>=11.0.3 
+websockets>=11.0.3
+loguru>=0.7.3 

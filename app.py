@@ -1,6 +1,7 @@
 import asyncio
-import logging
 import uvicorn
+import sys
+from loguru import logger
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -12,12 +13,13 @@ from models.session import SessionState, sessions
 from services.websocket.handler import handle_websocket_connection, cleanup_inactive_sessions, stop_tts_and_clear_queues, process_final_transcript
 from services.tts import close_all_tts_services
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(funcName)s - %(message)s'
+# 配置 loguru
+logger.remove()  # 移除默认处理器
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>",
+    colorize=True
 )
-logger = logging.getLogger(__name__)
 
 # 初始化FastAPI应用
 app = FastAPI(title="实时AI对话API")
@@ -53,7 +55,7 @@ async def startup_event() -> None:
     """应用启动时执行的操作"""
     # 启动会话清理任务
     asyncio.create_task(cleanup_inactive_sessions())
-    logger.info("应用已启动，正在监听WebSocket连接...")
+    logger.info("应用已启动，监听WebSocket连接")
 
 # 应用关闭时的事件处理
 @app.on_event("shutdown")

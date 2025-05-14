@@ -1,8 +1,8 @@
-import logging
 import asyncio
 import json
 import struct
 from typing import Dict, Any, Optional
+from loguru import logger
 
 from fastapi import WebSocket, WebSocketDisconnect
 from utils.audio import VoiceActivityDetector, parse_audio_header
@@ -12,8 +12,6 @@ from services.asr import create_asr_service
 from services.llm import create_llm_service
 from services.tts import create_tts_service, close_all_tts_services
 from config import Config
-
-logger = logging.getLogger(__name__)
 
 async def process_final_transcript(websocket: WebSocket, text: str, session_id: str) -> None:
     """处理最终转录文本，生成LLM响应并转换为语音
@@ -33,7 +31,7 @@ async def process_final_transcript(websocket: WebSocket, text: str, session_id: 
     session.update_activity()  # 更新活动时间
     
     try:
-        logger.info(f"使用LLM处理文本: '{text}'")
+        logger.info(f"LLM处理文本: '{text}' [sid:{session_id}]")
         
         # 向客户端发送LLM处理状态
         await websocket.send_json({
@@ -82,7 +80,7 @@ async def process_final_transcript(websocket: WebSocket, text: str, session_id: 
             async for chunk in llm_service.generate_response(text):
                 # 检查是否请求了中断
                 if session.is_interrupted():
-                    logger.info(f"检测到中断请求，停止LLM流式处理")
+                    logger.info(f"检测到中断请求，停止LLM流 [sid:{session_id}]")
                     break
                     
                 collected_response += chunk
@@ -112,7 +110,7 @@ async def process_final_transcript(websocket: WebSocket, text: str, session_id: 
                         while len(sentences_queue) > 0:
                             # 检查是否请求了中断
                             if session.is_interrupted():
-                                logger.info(f"检测到中断请求，停止处理剩余句子")
+                                logger.info(f"中断请求，停止处理剩余句子 [sid:{session_id}]")
                                 break
                                 
                             sentence = sentences_queue.pop(0)

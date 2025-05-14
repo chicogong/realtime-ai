@@ -1,11 +1,9 @@
-import logging
 import struct
 import time
 from typing import Tuple
+from loguru import logger
 
 from config import Config
-
-logger = logging.getLogger(__name__)
 
 class AudioDiagnostics:
     """音频问题诊断辅助类"""
@@ -44,16 +42,16 @@ class AudioDiagnostics:
     def report_stats(self) -> None:
         """报告音频统计信息"""
         if self.chunks_received == 0:
-            logger.warning("本报告周期内未收到音频块")
+            logger.warning("未收到音频块")
             return
         
         avg_chunk_size = self.total_bytes / self.chunks_received
         
         # 检查音频数据是否有效
         if avg_chunk_size < 10:
-            logger.warning(f"音频块非常小（平均{avg_chunk_size:.2f}字节）")
+            logger.warning(f"音频块过小(平均{avg_chunk_size:.2f}字节)")
         
-        logger.info(f"音频统计: {self.chunks_received}块, 共{self.total_bytes}字节, 平均{avg_chunk_size:.2f}字节/块")
+        logger.info(f"音频统计: {self.chunks_received}块 {self.total_bytes}字节 平均{avg_chunk_size:.2f}字节/块")
         
         # 重置计数器
         self.total_bytes = 0

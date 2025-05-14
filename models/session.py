@@ -1,9 +1,7 @@
 import time
-import logging
 import uuid
 from typing import Dict, Optional, Any
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 class SessionState:
     """管理用户会话状态"""
@@ -25,7 +23,7 @@ class SessionState:
     
     def request_interrupt(self) -> None:
         """标记会话需要被中断"""
-        logger.info(f"中断请求已接收，会话ID: {self.session_id}")
+        logger.info(f"中断请求: {self.session_id}")
         self.interrupt_requested = True
     
     def clear_interrupt(self) -> None:

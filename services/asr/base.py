@@ -1,11 +1,9 @@
 import asyncio
-import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Callable, Coroutine
+from loguru import logger
 
 from fastapi import WebSocket
-
-logger = logging.getLogger(__name__)
 
 class BaseASRService(ABC):
     """语音识别服务的抽象基类，定义所有ASR服务必须实现的接口"""

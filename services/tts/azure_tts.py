@@ -1,8 +1,8 @@
-import logging
 import asyncio
 import time
 from typing import Dict, Optional, Set, Any
 import json
+from loguru import logger
 
 import httpx
 import async_timeout
@@ -10,8 +10,6 @@ from fastapi import WebSocket
 
 from config import Config
 from services.tts.base import BaseTTSService
-
-logger = logging.getLogger(__name__)
 
 class AzureTTSService(BaseTTSService):
     """Azure TTS服务实现"""

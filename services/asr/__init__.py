@@ -1,11 +1,9 @@
-import logging
 from typing import Optional
+from loguru import logger
 
 from config import Config
 from services.asr.base import BaseASRService
 from services.asr.azure_asr import AzureASRService
-
-logger = logging.getLogger(__name__)
 
 def create_asr_service() -> Optional[BaseASRService]:
     """创建ASR服务实例
@@ -28,5 +26,5 @@ def create_asr_service() -> Optional[BaseASRService]:
             logger.error(f"不支持的ASR提供商: {Config.ASR_PROVIDER}")
             return None
     except Exception as e:
-        logger.error(f"创建ASR服务失败: {e}")
+        logger.error(f"ASR服务创建失败: {e}")
         return None

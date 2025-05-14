@@ -1,14 +1,12 @@
-import logging
 import asyncio
 from typing import AsyncGenerator, Dict, Any, List, Optional
+from loguru import logger
 
 import async_timeout
 from openai import AsyncOpenAI
 
 from config import Config
 from services.llm.base import BaseLLMService
-
-logger = logging.getLogger(__name__)
 
 class OpenAIService(BaseLLMService):
     """OpenAI语言模型服务实现"""
@@ -32,9 +30,7 @@ class OpenAIService(BaseLLMService):
         self.active_generation = None
         self.stop_requested = False
         
-        logger.info(f"OpenAI服务初始化: 模型={model}")
-        if base_url:
-            logger.info(f"使用自定义API端点: {base_url}")
+        logger.info(f"OpenAI服务初始化: 模型={model}" + (f", API={base_url}" if base_url else ""))
     
     async def generate_response(self, text: str, system_prompt: Optional[str] = None) -> AsyncGenerator[str, None]:
         """生成文本响应

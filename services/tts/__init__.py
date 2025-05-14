@@ -1,11 +1,9 @@
-import logging
 from typing import Optional
+from loguru import logger
 
 from config import Config
 from services.tts.base import BaseTTSService
 from services.tts.azure_tts import AzureTTSService
-
-logger = logging.getLogger(__name__)
 
 def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSService]:
     """创建TTS服务实例
@@ -39,7 +37,7 @@ def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSServ
             
         return tts_service
     except Exception as e:
-        logger.error(f"创建TTS服务失败: {e}")
+        logger.error(f"TTS服务创建失败: {e}")
         return None
 
 async def close_all_tts_services() -> None:

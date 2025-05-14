@@ -1,14 +1,12 @@
 import asyncio
-import logging
 import threading
 from typing import Optional, Callable
+from loguru import logger
 
 import azure.cognitiveservices.speech as speechsdk
 
 from utils.audio import AudioDiagnostics
 from services.asr.base import BaseASRService
-
-logger = logging.getLogger(__name__)
 
 class AzureASRService(BaseASRService):
     """Azure语音识别服务实现"""

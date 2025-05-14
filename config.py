@@ -1,13 +1,6 @@
 import os
-import logging
 from dotenv import load_dotenv
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(funcName)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # 加载环境变量
 load_dotenv()
@@ -50,23 +43,21 @@ class Config:
         # 验证ASR配置
         if cls.ASR_PROVIDER == "azure":
             if not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION:
-                logger.error("Azure Speech凭据缺失。请设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION环境变量。")
+                logger.error("Azure Speech凭据缺失，需设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION")
                 return False
         
         # 验证LLM配置
         if cls.LLM_PROVIDER == "openai":
             if not cls.OPENAI_API_KEY:
-                logger.error("OpenAI API密钥缺失。请设置OPENAI_API_KEY环境变量。")
+                logger.error("OpenAI API密钥缺失，需设置OPENAI_API_KEY")
                 return False
             
-            logger.info(f"使用OpenAI模型: {cls.OPENAI_MODEL}")
-            if cls.OPENAI_BASE_URL:
-                logger.info(f"使用自定义OpenAI基础URL: {cls.OPENAI_BASE_URL}")
+            logger.info(f"OpenAI模型: {cls.OPENAI_MODEL}" + (f", 自定义API: {cls.OPENAI_BASE_URL}" if cls.OPENAI_BASE_URL else ""))
         
         # 验证TTS配置
         if cls.TTS_PROVIDER == "azure":
             if not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION:
-                logger.error("Azure Speech凭据缺失。请设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION环境变量。")
+                logger.error("Azure Speech凭据缺失，需设置AZURE_SPEECH_KEY和AZURE_SPEECH_REGION")
                 return False
         
         logger.info("配置验证通过")
