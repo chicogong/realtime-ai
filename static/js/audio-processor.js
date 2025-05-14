@@ -15,7 +15,7 @@ let currentAudioSource = null;
 let audioBufferQueue = [];
 
 // 音频处理器对象
-const AudioProcessor = {
+window.AudioProcessor = {
     // 导出配置常量
     SAMPLE_RATE,
     CHANNELS,
@@ -200,7 +200,7 @@ const AudioProcessor = {
                         const b = tempChannelData[sourcePosFloor + 1];
                         targetChannelData[i] = a + fraction * (b - a);
                     } else if (sourcePosFloor < tempChannelData.length) {
-                        targetChannelData[i] = tempChannelData[sourcePosFloor];
+                        targetChannelData[i] = tempChannelData[sourcePosFloor] || 0;
                     }
                 }
                 
@@ -311,7 +311,4 @@ const AudioProcessor = {
             console.error('处理音频数据错误:', e);
         }
     }
-};
-
-// 导出AudioProcessor对象
-window.AudioProcessor = AudioProcessor; 
+}; 
