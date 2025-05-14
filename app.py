@@ -2,6 +2,7 @@ import asyncio
 import uvicorn
 import sys
 from loguru import logger
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -18,11 +19,32 @@ logger.remove()  # 移除默认处理器
 logger.add(
     sys.stderr,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>",
+    level="INFO",  # 设置为INFO级别，不再显示DEBUG日志
     colorize=True
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时执行的代码
+    # 启动会话清理任务
+    cleanup_task = asyncio.create_task(cleanup_inactive_sessions())
+    logger.info("应用已启动，监听WebSocket连接")
+    
+    yield  # 应用运行期间
+    
+    # 关闭时执行的代码
+    # 关闭TTS资源
+    await close_all_tts_services()
+    # 取消清理任务
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("应用已关闭")
+
 # 初始化FastAPI应用
-app = FastAPI(title="实时AI对话API")
+app = FastAPI(title="实时AI对话API", lifespan=lifespan)
 
 # 配置OpenAI客户端
 openai_client = AsyncOpenAI(
@@ -48,22 +70,6 @@ async def get_root() -> str:
 async def health_check() -> dict:
     """健康检查端点"""
     return {"status": "ok"}
-
-# 应用启动时的事件处理
-@app.on_event("startup")
-async def startup_event() -> None:
-    """应用启动时执行的操作"""
-    # 启动会话清理任务
-    asyncio.create_task(cleanup_inactive_sessions())
-    logger.info("应用已启动，监听WebSocket连接")
-
-# 应用关闭时的事件处理
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """应用关闭时执行的操作"""
-    # 关闭TTS资源
-    await close_all_tts_services()
-    logger.info("应用已关闭")
 
 # 服务静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import struct
+import time
 from typing import Dict, Any, Optional
 from loguru import logger
 
@@ -12,6 +13,11 @@ from services.asr import create_asr_service
 from services.llm import create_llm_service
 from services.tts import create_tts_service, close_all_tts_services
 from config import Config
+
+# 音频日志记录间隔(秒)
+AUDIO_LOG_INTERVAL = 5.0
+last_audio_log_time = 0
+audio_packets_received = 0
 
 async def process_final_transcript(websocket: WebSocket, text: str, session_id: str) -> None:
     """处理最终转录文本，生成LLM响应并转换为语音
@@ -278,9 +284,15 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
                         # 解析头部信息
                         timestamp, status_flags, pcm_data = parse_audio_header(audio_data)
                         
-                        # 日志记录传入音频块的信息（仅在调试模式下）
-                        if Config.DEBUG:
-                            logger.debug(f"接收音频: 时间戳={timestamp}, 状态={status_flags}, 大小={len(pcm_data)}字节")
+                        # 限制音频日志输出频率，每5秒记录一次汇总信息
+                        global last_audio_log_time, audio_packets_received
+                        audio_packets_received += 1
+                        current_time = time.time()
+                        
+                        if Config.DEBUG and current_time - last_audio_log_time > AUDIO_LOG_INTERVAL:
+                            logger.debug(f"音频接收统计: {audio_packets_received}个数据包 (过去{AUDIO_LOG_INTERVAL}秒)")
+                            last_audio_log_time = current_time
+                            audio_packets_received = 0
                         
                         # 检测是否有语音活动
                         has_voice = voice_detector.detect(pcm_data)
