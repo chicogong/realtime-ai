@@ -81,20 +81,6 @@ class MiniMaxTTSService(BaseTTSService):
             MiniMaxTTSService.active_tasks.add(self.send_task)
             self.send_task.add_done_callback(MiniMaxTTSService.active_tasks.discard)
         
-        # 创建TTS任务
-        tts_task = asyncio.create_task(self._process_single_sentence(text, websocket, is_first))
-        # 将任务添加到活动任务集合
-        MiniMaxTTSService.active_tasks.add(tts_task)
-        tts_task.add_done_callback(MiniMaxTTSService.active_tasks.discard)
-    
-    async def _process_single_sentence(self, text: str, websocket: WebSocket, is_first: bool = False) -> None:
-        """处理单个句子的TTS请求
-        
-        Args:
-            text: 要合成的文本
-            websocket: WebSocket连接
-            is_first: 是否是本次响应的第一句话
-        """
         try:
             # 获取HTTP客户端
             client = await MiniMaxTTSService.get_http_client()
@@ -127,9 +113,6 @@ class MiniMaxTTSService(BaseTTSService):
                 }
             }
             
-            # 记录请求参数
-            logger.info(f"TTS请求参数: model={self.model}, voice_id={self.voice_id}, sample_rate=16000, format=pcm")
-            
             # 增加情绪参数传递
             if self.emotion:
                 payload["voice_setting"]["emotion"] = self.emotion
@@ -138,14 +121,8 @@ class MiniMaxTTSService(BaseTTSService):
             start_time = time.time()
             logger.info(f"开始MiniMax TTS请求，文本长度: {len(text)}个字符")
             
-            # 通知客户端开始音频处理
-            await websocket.send_json({
-                "type": "audio_start",
-                "format": "raw-16khz-16bit-mono-pcm",  # 16kHz PCM格式
-                "is_first": is_first,
-                "text": text,
-                "session_id": self.session_id
-            })
+            # 用于收集音频数据的列表
+            all_audio_data = bytearray()
             
             try:
                 async with async_timeout.timeout(10):  # 10秒超时
@@ -158,12 +135,15 @@ class MiniMaxTTSService(BaseTTSService):
                     async with client.stream("POST", url, headers=headers, json=payload, timeout=30.0) as response:
                         response.raise_for_status()
                         
-                        # 获取请求ID和追踪ID
-                        request_id = response.headers.get("Minimax-Request-Id", "unknown")
-                        trace_id = response.headers.get("Trace-Id", "unknown")
-                        
                         # 根据参考实现来处理响应内容
                         async for chunk in response.aiter_bytes():
+                            # 检查会话是否已中断
+                            from models.session import get_session
+                            session = get_session(self.session_id)
+                            if session.is_interrupted():
+                                logger.info(f"会话已中断，停止TTS流")
+                                break
+                                
                             if len(chunk) == 0 or chunk == b'\n':
                                 continue
                                 
@@ -184,15 +164,14 @@ class MiniMaxTTSService(BaseTTSService):
                                 line = lines[i]
                                 if not line:
                                     continue
-                                
-                                # 检查是否是data:前缀
+                                    
+                                # 处理data:前缀的行
                                 if line.startswith(b'data:'):
                                     json_str = None
                                     
-                                    # 处理无空格data:前缀
+                                    # 提取JSON字符串
                                     if line.startswith(b'data:') and line[5:6] != b' ':
                                         json_str = line[5:]
-                                    # 处理有空格data:前缀
                                     elif line.startswith(b'data: '):
                                         json_str = line[6:]
                                     
@@ -200,7 +179,7 @@ class MiniMaxTTSService(BaseTTSService):
                                         continue
                                         
                                     try:
-                                        # 尝试解析JSON
+                                        # 解析JSON
                                         data = json.loads(json_str)
                                         
                                         # 检查错误
@@ -227,77 +206,33 @@ class MiniMaxTTSService(BaseTTSService):
                                                     try:
                                                         decoded_audio = bytes.fromhex(audio_hex)
                                                         if decoded_audio:
-                                                            # 验证PCM数据
-                                                            # 检查数据长度是否为偶数（16位PCM）
-                                                            if len(decoded_audio) % 2 != 0:
-                                                                logger.warning(f"PCM数据长度不是偶数: {len(decoded_audio)}字节，截断最后一个字节")
-                                                                decoded_audio = decoded_audio[:-1]
-                                                                
-                                                            # 简单验证PCM数据 - 检查前几个样本是否在合理范围内
-                                                            valid_pcm = True
-                                                            invalid_samples = 0
-                                                            # 从二进制数据中解析出前10个16位有符号整数样本
-                                                            for j in range(0, min(20, len(decoded_audio)), 2):
-                                                                try:
-                                                                    sample = struct.unpack('<h', decoded_audio[j:j+2])[0]  # 小端序，有符号16位整数
-                                                                    if abs(sample) > 32767:  # 16位有符号整数的范围是-32768到32767
-                                                                        invalid_samples += 1
-                                                                        if invalid_samples > 2:  # 允许少量异常值
-                                                                            valid_pcm = False
-                                                                            logger.warning(f"检测到多个无效PCM样本，最后一个: {sample}，位置: {j}")
-                                                                            break
-                                                                except Exception as e:
-                                                                    logger.error(f"PCM样本解析错误: {e}")
-                                                            
-                                                            # 记录音频数据信息
-                                                            hex_len = len(audio_hex)
-                                                            bin_len = len(decoded_audio)
-                                                            
-                                                            # 检查数据长度，确保有有效数据
-                                                            if bin_len > 0 and valid_pcm:
-                                                                logger.debug(f"解析到有效音频数据: hex长度={hex_len}, 二进制长度={bin_len}字节")
-                                                                
-                                                                # 将音频数据加入发送队列
-                                                                item = {
-                                                                    "audio_data": decoded_audio,
-                                                                    "is_first": False,
-                                                                    "text": "",
-                                                                    "is_final": False
-                                                                }
-                                                                await self.send_queue.put(item)
-                                                                logger.debug(f"音频数据已加入队列: {len(decoded_audio)}字节")
-                                                            else:
-                                                                if not valid_pcm:
-                                                                    logger.warning(f"跳过无效PCM数据块: hex长度={hex_len}, 数据可能已损坏")
-                                                                elif bin_len == 0:
-                                                                    logger.warning(f"跳过空音频数据块: hex长度={hex_len}")
-                                                        else:
-                                                            logger.warning(f"解码后的音频数据为空: hex长度={len(audio_hex)}")
+                                                            # 确保PCM数据有效
+                                                            if len(decoded_audio) > 0:
+                                                                # 将音频数据追加到总缓冲区
+                                                                all_audio_data.extend(decoded_audio)
                                                     except ValueError as hex_err:
-                                                        logger.error(f"音频数据hex解码错误: {str(hex_err)}, audio_hex前20个字符: {audio_hex[:20]}, trace_id={trace_id}, requestid={request_id}")
-                                    except json.JSONDecodeError as je:
-                                        # 记录更详细的错误信息
-                                        logger.warning(f"JSON解析错误: {str(je)}, 行内容前50个字符: {line[:50]}")
+                                                        logger.error(f"音频数据hex解码错误: {str(hex_err)}")
                                     except Exception as e:
-                                        logger.error(f"处理data行异常: {str(e)}, trace_id={trace_id}, requestid={request_id}")
-                                else:
-                                    # 非data开头的行
-                                    logger.debug(f"跳过非data行: {line[:50]}...")
+                                        logger.error(f"处理音频数据异常: {str(e)}")
                             
                             # 保留最后一行，可能不完整
                             buffer = lines[-1]
+                    
+                    # 处理完成，将完整音频数据加入发送队列
+                    if all_audio_data:
+                        # 再次检查会话是否已中断
+                        if session.is_interrupted():
+                            logger.info(f"会话已中断，跳过添加音频到队列")
+                            return
+                            
+                        item = {
+                            "audio_data": bytes(all_audio_data),
+                            "is_first": is_first,
+                            "text": text
+                        }
+                        await self.send_queue.put(item)
+                        logger.info(f"MiniMax TTS请求完成，耗时: {time.time() - start_time:.2f}秒，总大小: {len(all_audio_data)} 字节")
                 
-                # 处理完成后，发送最终标记
-                item = {
-                    "audio_data": b"",
-                    "is_first": False,
-                    "text": "",
-                    "is_final": True
-                }
-                await self.send_queue.put(item)
-                
-                logger.info(f"MiniMax TTS请求完成，耗时: {time.time() - start_time:.2f}秒")
-            
             except asyncio.TimeoutError:
                 logger.error(f"MiniMax TTS请求超时: {text[:30]}...")
                 # 通知客户端错误
@@ -307,7 +242,7 @@ class MiniMaxTTSService(BaseTTSService):
                     "session_id": self.session_id
                 })
         except Exception as e:
-            logger.error(f"MiniMax TTS处理错误: {e}\n{traceback.format_exc()}")
+            logger.error(f"MiniMax TTS处理错误: {e}")
             # 通知客户端错误
             await websocket.send_json({
                 "type": "error",
@@ -316,7 +251,7 @@ class MiniMaxTTSService(BaseTTSService):
             })
     
     async def _process_send_queue(self, websocket: WebSocket) -> None:
-        """处理发送队列中的音频数据
+        """处理发送队列中的音频数据，按队列顺序发送
         
         Args:
             websocket: WebSocket连接
@@ -324,21 +259,21 @@ class MiniMaxTTSService(BaseTTSService):
         self.is_processing = True
         total_audio_size = 0
         audio_chunk_count = 0
-        start_time = time.time()
         
         try:
-            logger.info(f"音频发送队列处理任务已启动")
+            logger.info(f"音频处理队列任务已启动")
             while True:
                 # 获取下一个待发送项目
                 item = await self.send_queue.get()
                 audio_data = item["audio_data"]
-                is_final = item["is_final"]
+                is_first = item["is_first"]
+                text = item["text"]
                 
                 # 检查会话是否已中断
                 from models.session import get_session
                 session = get_session(self.session_id)
                 if session.is_interrupted():
-                    logger.info(f"会话已中断，跳过音频发送")
+                    logger.info(f"会话已中断，跳过音频发送: {text[:30]}...")
                     self.send_queue.task_done()
                     continue
                 
@@ -346,75 +281,45 @@ class MiniMaxTTSService(BaseTTSService):
                 session.is_tts_active = True
                 
                 try:
-                    # 发送音频数据（如果有）
-                    if audio_data:
-                        # 音频统计数据累加
-                        audio_size = len(audio_data)
-                        total_audio_size += audio_size
-                        audio_chunk_count += 1
-                        
-                        # 确保PCM数据是偶数字节长度（16位PCM每个采样点需要2字节）
-                        if audio_size % 2 != 0:
-                            logger.warning(f"PCM数据长度不是偶数字节 ({audio_size}字节)，将调整数据大小")
-                            # 去掉最后一个字节以保持偶数长度
-                            audio_data = audio_data[:-1]
-                            audio_size -= 1
-                        
-                        # 只在第一次或较长间隔后分析PCM数据
-                        if audio_chunk_count == 1 or audio_chunk_count % 10 == 0:
-                            if audio_size > 0:
-                                try:
-                                    # 计算PCM音频基本统计信息
-                                    import array
-                                    samples = array.array('h')
-                                    try:
-                                        samples.frombytes(audio_data)
-                                        if len(samples) > 0:
-                                            min_val = min(samples)
-                                            max_val = max(samples)
-                                            avg_val = sum(samples) / len(samples)
-                                            # 计算有效范围 (静音检测)
-                                            range_val = max_val - min_val
-                                            is_silence = range_val < 100  # 简单判断是否为静音
-                                            
-                                            log_level = logger.warning if is_silence else logger.info
-                                            log_level(f"PCM音频分析: 样本数={len(samples)}, 范围={range_val}, 最小值={min_val}, 最大值={max_val}, 平均值={avg_val:.2f}, 静音={is_silence}")
-                                    except Exception as e:
-                                        logger.warning(f"PCM分析错误: {str(e)}")
-                                except ImportError:
-                                    pass
-                        
-                        # 发送音频数据到客户端
-                        logger.debug(f"发送音频块 #{audio_chunk_count}: {audio_size}字节")
-                        await websocket.send_bytes(audio_data)
+                    # 通知客户端开始音频处理
+                    await websocket.send_json({
+                        "type": "audio_start",
+                        "format": "raw-16khz-16bit-mono-pcm",  # 16kHz PCM格式
+                        "is_first": is_first,
+                        "text": text,
+                        "session_id": self.session_id
+                    })
                     
-                    # 如果是最后一块数据，发送结束标记
-                    if is_final:
-                        duration = time.time() - start_time
-                        logger.info(f"音频流结束: 总大小={total_audio_size}字节, 块数={audio_chunk_count}, 持续时间={duration:.2f}秒")
-                        
-                        # 发送音频结束标记
-                        await websocket.send_json({
-                            "type": "audio_end",
-                            "session_id": self.session_id
-                        })
-                        
-                        # 标记TTS已完成
-                        session.is_tts_active = False
+                    # 发送音频数据
+                    await websocket.send_bytes(audio_data)
+                    
+                    # 发送音频结束标记
+                    await websocket.send_json({
+                        "type": "audio_end",
+                        "session_id": self.session_id
+                    })
+                    
+                    # 更新统计信息
+                    total_audio_size += len(audio_data)
+                    audio_chunk_count += 1
+                    
+                    logger.info(f"音频数据已发送, 大小: {len(audio_data)} 字节")
                 except Exception as e:
                     logger.error(f"发送音频数据错误: {e}")
+                finally:
+                    # 标记TTS已完成
                     session.is_tts_active = False
                 
                 # 标记任务完成
                 self.send_queue.task_done()
                 
         except asyncio.CancelledError:
-            logger.info("发送队列处理被取消")
+            logger.info("音频处理队列被取消")
         except Exception as e:
-            logger.error(f"TTS发送队列处理异常: {e}")
+            logger.error(f"TTS处理队列异常: {e}")
         finally:
             self.is_processing = False
-            logger.info(f"音频发送队列处理任务已结束: 总块数={audio_chunk_count}, 总大小={total_audio_size}字节")
+            logger.info(f"音频处理队列任务已结束: 总块数={audio_chunk_count}, 总大小={total_audio_size}字节")
     
     @classmethod
     async def interrupt_all(cls) -> None:

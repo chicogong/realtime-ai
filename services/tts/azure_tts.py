@@ -68,22 +68,8 @@ class AzureTTSService(BaseTTSService):
             AzureTTSService.active_tasks.add(self.send_task)
             self.send_task.add_done_callback(AzureTTSService.active_tasks.discard)
         
-        # 创建TTS任务
-        tts_task = asyncio.create_task(self._process_single_sentence(text, websocket, is_first))
-        # 将任务添加到活动任务集合
-        AzureTTSService.active_tasks.add(tts_task)
-        tts_task.add_done_callback(AzureTTSService.active_tasks.discard)
-    
-    async def _process_single_sentence(self, text: str, websocket: WebSocket, is_first: bool = False) -> None:
-        """处理单个句子的TTS请求
-        
-        Args:
-            text: 要合成的文本
-            websocket: WebSocket连接
-            is_first: 是否是本次响应的第一句话
-        """
         try:
-            # 从会话共享的HTTP客户端
+            # 获取HTTP客户端
             client = await AzureTTSService.get_http_client()
             
             # 构建SSML
@@ -119,6 +105,13 @@ class AzureTTSService(BaseTTSService):
                 
                 logger.info(f"TTS请求完成，耗时: {time.time() - start_time:.2f}秒，音频大小: {len(audio_data)} 字节")
                 
+                # 检查会话是否已中断
+                from models.session import get_session
+                session = get_session(self.session_id)
+                if session.is_interrupted():
+                    logger.info(f"会话已中断，跳过添加音频到队列")
+                    return
+                
                 # 将音频数据加入发送队列
                 item = {
                     "audio_data": audio_data,
@@ -145,12 +138,14 @@ class AzureTTSService(BaseTTSService):
             })
     
     async def _process_send_queue(self, websocket: WebSocket) -> None:
-        """处理发送队列中的音频数据
+        """处理发送队列中的音频数据，按队列顺序发送
         
         Args:
             websocket: WebSocket连接
         """
         self.is_processing = True
+        total_audio_size = 0
+        audio_chunk_count = 0
         
         try:
             while True:
@@ -190,12 +185,14 @@ class AzureTTSService(BaseTTSService):
                         "session_id": self.session_id
                     })
                     
-                    # 标记TTS已完成
-                    session.is_tts_active = False
+                    total_audio_size += len(audio_data)
+                    audio_chunk_count += 1
                     
-                    logger.info(f"音频数据已发送，大小: {len(audio_data)} 字节")
+                    logger.info(f"音频数据已发送, 大小: {len(audio_data)} 字节")
                 except Exception as e:
                     logger.error(f"发送音频数据错误: {e}")
+                finally:
+                    # 标记TTS已完成
                     session.is_tts_active = False
                 
                 # 标记任务完成
@@ -207,6 +204,7 @@ class AzureTTSService(BaseTTSService):
             logger.error(f"TTS发送队列处理异常: {e}")
         finally:
             self.is_processing = False
+            logger.info(f"处理队列已结束: 总块数={audio_chunk_count}, 总大小={total_audio_size}字节")
     
     @classmethod
     async def interrupt_all(cls) -> None:
