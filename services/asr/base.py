@@ -1,68 +1,49 @@
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Optional, Any, Callable, Coroutine
+from typing import Optional
 from loguru import logger
 
 from fastapi import WebSocket
 
 class BaseASRService(ABC):
-    """语音识别服务的抽象基类，定义所有ASR服务必须实现的接口"""
+    """Abstract base class for speech recognition services"""
     
-    def __init__(self, language: str = "zh-CN"):
-        """初始化ASR服务
-        
-        Args:
-            language: 识别语言代码
-        """
+    def __init__(self, language: str = "en-US"):
         self.language = language
         self.is_recognizing = False
         self.websocket: Optional[WebSocket] = None
         self.session_id: str = ""
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.last_partial_result = ""  # 最后的部分识别结果
+        self.last_partial_result = ""
     
     def set_websocket(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop, session_id: str) -> None:
-        """设置WebSocket连接和事件循环
-        
-        Args:
-            websocket: WebSocket连接对象
-            loop: 事件循环
-            session_id: 会话ID
-        """
+        """Set WebSocket connection and event loop"""
         self.websocket = websocket
         self.loop = loop
         self.session_id = session_id
     
     @abstractmethod
     async def start_recognition(self) -> None:
-        """开始语音识别"""
+        """Start speech recognition"""
         pass
     
     @abstractmethod
     async def stop_recognition(self) -> None:
-        """停止语音识别"""
+        """Stop speech recognition"""
         pass
     
     @abstractmethod
     def feed_audio(self, audio_chunk: bytes) -> None:
-        """处理输入的音频数据
-        
-        Args:
-            audio_chunk: 音频数据块
-        """
+        """Process incoming audio data"""
         pass
     
     @abstractmethod
     def setup_handlers(self) -> None:
-        """设置事件处理程序"""
+        """Setup event handlers"""
         pass
     
     async def send_partial_transcript(self, text: str) -> None:
-        """发送部分识别结果
-        
-        Args:
-            text: 识别文本
-        """
+        """Send partial recognition result"""
         if self.websocket and text.strip():
             await self.websocket.send_json({
                 "type": "partial_transcript",
@@ -71,11 +52,7 @@ class BaseASRService(ABC):
             })
     
     async def send_final_transcript(self, text: str) -> None:
-        """发送最终识别结果
-        
-        Args:
-            text: 识别文本
-        """
+        """Send final recognition result"""
         if self.websocket and text.strip():
             await self.websocket.send_json({
                 "type": "final_transcript",
@@ -84,11 +61,7 @@ class BaseASRService(ABC):
             })
     
     async def send_status(self, status: str) -> None:
-        """发送状态信息
-        
-        Args:
-            status: 状态描述
-        """
+        """Send status information"""
         if self.websocket:
             await self.websocket.send_json({
                 "type": "status",
@@ -97,11 +70,7 @@ class BaseASRService(ABC):
             })
     
     async def send_error(self, error_message: str) -> None:
-        """发送错误信息
-        
-        Args:
-            error_message: 错误消息
-        """
+        """Send error message"""
         if self.websocket:
             await self.websocket.send_json({
                 "type": "error",
