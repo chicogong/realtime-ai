@@ -110,6 +110,9 @@ function endConversation() {
     isSessionActive = false;
     isInitialAudioBlock = true;
     
+    // 先停止所有音频播放
+    audioProcessor.stopAudioPlayback();
+    
     if (activeMediaStream) {
         activeMediaStream.getTracks().forEach(track => track.stop());
     }
@@ -119,13 +122,12 @@ function endConversation() {
         audioProcessor_node = null;
     }
     
-    audioProcessor.stopAudioPlayback();
-    
     const audioContext = getAudioContext();
     if (audioContext && audioContext.state === "running" && !isAudioPlaying()) {
         audioContext.suspend().catch(console.error);
     }
     
+    // 向后台发送停止信令
     websocketHandler.sendStopAndClearQueues();
     
     startButton.disabled = false;
