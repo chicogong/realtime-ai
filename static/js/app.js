@@ -2,6 +2,9 @@
  * 主应用脚本
  */
 
+import AudioProcessor from './audio-processor.js';
+import WebSocketHandler from './websocket-handler.js';
+
 // 状态变量
 let mediaStream = null;
 let processor = null;
@@ -39,19 +42,19 @@ async function startRecording() {
             } 
         });
         
-        if (!window.AudioProcessor.initAudioContext()) {
+        if (!AudioProcessor.initAudioContext()) {
             throw new Error('无法初始化音频上下文');
         }
         
         const audioContext = getAudioContext();
         originalSampleRate = audioContext.sampleRate;
-        resampleRequired = originalSampleRate !== window.AudioProcessor.SAMPLE_RATE;
+        resampleRequired = originalSampleRate !== AudioProcessor.SAMPLE_RATE;
         
         const source = audioContext.createMediaStreamSource(mediaStream);
         processor = audioContext.createScriptProcessor(
-            window.AudioProcessor.BUFFER_SIZE, 
-            window.AudioProcessor.CHANNELS, 
-            window.AudioProcessor.CHANNELS
+            AudioProcessor.BUFFER_SIZE, 
+            AudioProcessor.CHANNELS, 
+            AudioProcessor.CHANNELS
         );
         
         processor.onaudioprocess = processAudio;
@@ -63,7 +66,7 @@ async function startRecording() {
         startBtn.disabled = true;
         stopBtn.disabled = false;
         
-        window.WebSocketHandler.sendCommand('start');
+        WebSocketHandler.sendCommand('start');
     } catch (error) {
         console.error('麦克风访问错误:', error);
         updateStatus('error', '麦克风访问错误');
@@ -74,23 +77,23 @@ async function startRecording() {
  * 处理音频数据
  */
 function processAudio(e) {
-    if (!isRecording || !window.WebSocketHandler.getSocket() || 
-        window.WebSocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
+    if (!isRecording || !WebSocketHandler.getSocket() || 
+        WebSocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
     
     const inputData = e.inputBuffer.getChannelData(0);
-    window.WebSocketHandler.checkVoiceInterruption(inputData);
+    WebSocketHandler.checkVoiceInterruption(inputData);
     
     let audioToProcess = inputData;
     if (resampleRequired) {
-        audioToProcess = window.AudioProcessor.downsampleBuffer(
-            inputData, originalSampleRate, window.AudioProcessor.SAMPLE_RATE
+        audioToProcess = AudioProcessor.downsampleBuffer(
+            inputData, originalSampleRate, AudioProcessor.SAMPLE_RATE
         );
     }
     
-    const pcmData = window.AudioProcessor.convertFloat32ToInt16(audioToProcess);
+    const pcmData = AudioProcessor.convertFloat32ToInt16(audioToProcess);
     
     // 使用WebSocketHandler发送音频数据
-    window.WebSocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
+    WebSocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
     
     // 重置首块标志
     if (isFirstAudioBlock) {
@@ -116,14 +119,14 @@ function stopRecording() {
         processor = null;
     }
     
-    window.AudioProcessor.stopAudioPlayback();
+    AudioProcessor.stopAudioPlayback();
     
     const audioContext = getAudioContext();
     if (audioContext && audioContext.state === "running" && !isAudioPlaying()) {
         audioContext.suspend().catch(console.error);
     }
     
-    window.WebSocketHandler.sendStopAndClearQueues();
+    WebSocketHandler.sendStopAndClearQueues();
     
     startBtn.disabled = false;
     stopBtn.disabled = true;
@@ -138,10 +141,10 @@ function resetSession() {
         stopRecording();
     }
     
-    window.AudioProcessor.stopAudioPlayback();
+    AudioProcessor.stopAudioPlayback();
     messages.innerHTML = '';
     isFirstAudioBlock = true;
-    window.WebSocketHandler.sendCommand('reset');
+    WebSocketHandler.sendCommand('reset');
     updateStatus('idle', '已重置');
 }
 
@@ -149,21 +152,21 @@ function resetSession() {
  * 获取音频上下文
  */
 function getAudioContext() {
-    return window.AudioProcessor ? window.AudioProcessor.getAudioContext() : null;
+    return AudioProcessor ? AudioProcessor.getAudioContext() : null;
 }
 
 /**
  * 检查是否正在播放音频
  */
 function isAudioPlaying() {
-    return window.AudioProcessor ? window.AudioProcessor.isPlaying() : false;
+    return AudioProcessor ? AudioProcessor.isPlaying() : false;
 }
 
 /**
  * 初始化应用
  */
 function init() {
-    window.WebSocketHandler.initializeWebSocket(updateStatus, startBtn);
+    WebSocketHandler.initializeWebSocket(updateStatus, startBtn);
     
     startBtn.addEventListener('click', startRecording);
     stopBtn.addEventListener('click', stopRecording);
@@ -185,7 +188,7 @@ function init() {
     window.addEventListener('beforeunload', () => {
         if (isRecording) stopRecording();
         
-        const socket = window.WebSocketHandler.getSocket();
+        const socket = WebSocketHandler.getSocket();
         if (socket) socket.close();
         
         const audioContext = getAudioContext();

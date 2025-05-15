@@ -15,7 +15,7 @@ let currentAudioSource = null;
 let audioBufferQueue = [];
 
 // 音频处理器对象
-window.AudioProcessor = {
+const AudioProcessor = {
     // 导出配置常量
     SAMPLE_RATE,
     CHANNELS,
@@ -276,4 +276,7 @@ window.AudioProcessor = {
         
         return sum / buffer.length;
     },
-}; 
+};
+
+// 使用ES模块导出
+export default AudioProcessor; 
