@@ -57,10 +57,78 @@ window.WebSocketHandler = {
                 this.handleMessage(data, updateStatus);
             } else if (event.data instanceof Blob) {
                 console.log('收到二进制数据:', event.data.size, '字节');
-                window.AudioProcessor.handleBinaryAudioData(event.data);
+                this.handleReceivedAudioData(event.data);
             }
         } catch (e) {
             console.error('处理消息错误:', e);
+        }
+    },
+
+    // 处理接收到的音频数据
+    async handleReceivedAudioData(blob) {
+        try {
+            const arrayBuffer = await blob.arrayBuffer();
+            
+            // 检查数据大小
+            if (arrayBuffer.byteLength <= 0) {
+                console.warn('收到的音频数据为空，无法处理');
+                return;
+            }
+            
+            console.log('处理接收的音频数据，总大小:', arrayBuffer.byteLength, '字节');
+            
+            // 检查是否有头部信息
+            if (arrayBuffer.byteLength >= 12) {
+                // 带头部的格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
+                const headerView = new DataView(arrayBuffer, 0, 12);
+                const requestId = headerView.getUint32(0, true); // 小端序
+                const chunkNumber = headerView.getUint32(4, true);
+                const timestamp = headerView.getUint32(8, true);
+                
+                // 仅显示首个块的日志
+                if (chunkNumber === 1) {
+                    console.log(`收到音频块: 请求ID=${requestId}, 块=${chunkNumber}, 时间戳=${timestamp}, 数据大小=${arrayBuffer.byteLength - 12}字节`);
+                }
+                
+                // 提取PCM音频数据，从12字节开始
+                let audioData = arrayBuffer.slice(12);
+                
+                // 确保音频数据的大小是偶数字节（16位PCM需要）
+                if (audioData.byteLength % 2 !== 0) {
+                    console.warn('音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
+                    audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
+                    console.log('调整后音频数据大小:', audioData.byteLength, '字节');
+                }
+                
+                // 如果有有效数据，则发送到音频处理器播放
+                if (audioData.byteLength > 0) {
+                    console.log(`播放音频块: ${audioData.byteLength}字节`);
+                    window.AudioProcessor.playAudio(audioData);
+                } else {
+                    console.warn('处理后音频数据为空，跳过播放');
+                }
+            } else {
+                // 可能是直接的PCM格式（没有头部信息）
+                console.log('收到直接PCM音频数据，大小:', arrayBuffer.byteLength, '字节');
+                
+                // 确保音频数据的大小是偶数字节（16位PCM需要）
+                let audioData = arrayBuffer;
+                if (audioData.byteLength % 2 !== 0) {
+                    console.warn('直接PCM音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
+                    audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
+                    console.log('调整后直接PCM音频数据大小:', audioData.byteLength, '字节');
+                }
+                
+                // 播放音频
+                if (audioData.byteLength > 0) {
+                    console.log(`播放直接PCM音频: ${audioData.byteLength}字节`);
+                    window.AudioProcessor.playAudio(audioData);
+                } else {
+                    console.warn('处理后直接PCM音频数据为空，跳过播放');
+                }
+            }
+        } catch (e) {
+            console.error('处理接收的音频数据错误:', e);
         }
     },
 
@@ -219,6 +287,56 @@ window.WebSocketHandler = {
     sendStopAndClearQueues() {
         this.sendCommand('stop');
         this.sendCommand('clear_queues');
+    },
+    
+    // 发送音频数据
+    sendAudioData(pcmData, isFirstBlock = false) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        
+        try {
+            // 创建带头部的数据缓冲区 [4字节时间戳][4字节状态标志]
+            const headerSize = 8;
+            const combinedBuffer = new ArrayBuffer(headerSize + pcmData.byteLength);
+            const headerView = new DataView(combinedBuffer, 0, headerSize);
+            
+            // 设置时间戳 (毫秒)
+            headerView.setUint32(0, Date.now(), true);
+            
+            // 设置状态标志
+            let statusFlags = 0;
+            
+            // 如果是Float32Array，先计算能量值
+            if (pcmData instanceof Float32Array) {
+                const energy = Math.min(255, Math.floor(this._calculateAudioLevel(pcmData) * 1000));
+                statusFlags |= energy & 0xFF;
+                
+                if (pcmData.every(sample => Math.abs(sample) < 0.01)) {
+                    statusFlags |= (1 << 8);
+                }
+            } else {
+                // 对于Int16Array数据，简单设置一个默认值
+                statusFlags |= 128;  // 中等音量
+            }
+            
+            // 设置首个音频块标志
+            if (isFirstBlock) {
+                statusFlags |= (1 << 9);
+            }
+            
+            headerView.setUint32(4, statusFlags, true);
+            
+            // 将PCM数据复制到组合缓冲区
+            new Uint8Array(combinedBuffer, headerSize).set(
+                new Uint8Array(pcmData.buffer || pcmData)
+            );
+            
+            // 发送数据
+            this.socket.send(combinedBuffer);
+            return true;
+        } catch (e) {
+            console.error('发送音频数据错误:', e);
+            return false;
+        }
     },
 
     // 检查用户是否在AI响应时开始说话

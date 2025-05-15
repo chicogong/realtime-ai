@@ -89,33 +89,12 @@ function processAudio(e) {
     
     const pcmData = window.AudioProcessor.convertFloat32ToInt16(audioToProcess);
     
-    // 创建带头部的数据缓冲区 [4字节时间戳][4字节状态标志]
-    const headerSize = 8;
-    const combinedBuffer = new ArrayBuffer(headerSize + pcmData.byteLength);
-    const headerView = new DataView(combinedBuffer, 0, headerSize);
+    // 使用WebSocketHandler发送音频数据
+    window.WebSocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
     
-    // 设置时间戳 (毫秒)
-    headerView.setUint32(0, Date.now(), true);
-    
-    // 设置状态标志
-    let statusFlags = 0;
-    const energy = Math.min(255, Math.floor(window.AudioProcessor.detectAudioLevel(inputData) * 1000));
-    statusFlags |= energy & 0xFF;
-    
-    if (inputData.every(sample => Math.abs(sample) < 0.01)) {
-        statusFlags |= (1 << 8);
-    }
-    
+    // 重置首块标志
     if (isFirstAudioBlock) {
-        statusFlags |= (1 << 9);
         isFirstAudioBlock = false;
-    }
-    
-    headerView.setUint32(4, statusFlags, true);
-    new Uint8Array(combinedBuffer, headerSize).set(new Uint8Array(pcmData.buffer));
-    
-    if (window.WebSocketHandler.getSocket().readyState === WebSocket.OPEN) {
-        window.WebSocketHandler.getSocket().send(combinedBuffer);
     }
 }
 
