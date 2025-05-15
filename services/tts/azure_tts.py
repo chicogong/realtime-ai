@@ -169,7 +169,7 @@ class AzureTTSService(BaseTTSService):
                 try:
                     # 发送音频类型信息
                     await websocket.send_json({
-                        "type": "audio_start",
+                        "type": "tts_start",
                         "format": "raw-16khz-16bit-mono-pcm",
                         "is_first": is_first,
                         "text": text,
@@ -181,7 +181,7 @@ class AzureTTSService(BaseTTSService):
                     
                     # 发送音频结束标记
                     await websocket.send_json({
-                        "type": "audio_end",
+                        "type": "tts_end",
                         "session_id": self.session_id
                     })
                     
@@ -197,53 +197,51 @@ class AzureTTSService(BaseTTSService):
                 
                 # 标记任务完成
                 self.send_queue.task_done()
-                
         except asyncio.CancelledError:
-            logger.info("发送队列处理被取消")
+            logger.info("TTS发送队列任务被取消")
         except Exception as e:
             logger.error(f"TTS发送队列处理异常: {e}")
         finally:
             self.is_processing = False
-            logger.info(f"处理队列已结束: 总块数={audio_chunk_count}, 总大小={total_audio_size}字节")
-    
+            
     @classmethod
     async def interrupt_all(cls) -> None:
         """中断所有活动的TTS任务"""
         for task in list(cls.active_tasks):
             if not task.done():
+                logger.info(f"中断TTS任务: {task}")
                 task.cancel()
-        
-        # 等待所有任务取消完成
+                
+        # 等待任务取消完成
         if cls.active_tasks:
-            await asyncio.gather(*cls.active_tasks, return_exceptions=True)
+            await asyncio.gather(*[asyncio.create_task(asyncio.sleep(0.1)) for _ in cls.active_tasks], return_exceptions=True)
     
     async def interrupt(self) -> bool:
-        """中断当前会话的TTS任务
+        """中断当前的语音合成
         
         Returns:
             是否成功中断
         """
-        interrupted = False
-        
-        # 清空发送队列
-        while not self.send_queue.empty():
-            try:
-                self.send_queue.get_nowait()
-                self.send_queue.task_done()
-                interrupted = True
-            except asyncio.QueueEmpty:
-                break
-        
-        # 取消发送任务
         if self.send_task and not self.send_task.done():
+            logger.info(f"中断TTS任务: {self.send_task}")
             self.send_task.cancel()
-            interrupted = True
+            
+            # 等待任务被正确取消
             try:
-                await self.send_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(asyncio.create_task(asyncio.sleep(0.1)), timeout=0.2)
+            except asyncio.TimeoutError:
                 pass
-        
-        return interrupted
+            
+            # 重置队列
+            while not self.send_queue.empty():
+                try:
+                    self.send_queue.get_nowait()
+                    self.send_queue.task_done()
+                except Exception:
+                    pass
+            
+            return True
+        return False
     
     @classmethod
     async def close_all(cls) -> None:
@@ -252,10 +250,10 @@ class AzureTTSService(BaseTTSService):
         await cls.interrupt_all()
         
         # 关闭HTTP客户端
-        if cls._http_client and not cls._http_client.is_closed:
+        if cls._http_client is not None and not cls._http_client.is_closed:
             await cls._http_client.aclose()
             cls._http_client = None
-    
+            
     async def close(self) -> None:
         """关闭TTS服务，释放资源"""
         await self.interrupt() 

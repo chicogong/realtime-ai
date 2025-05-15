@@ -93,12 +93,21 @@ window.WebSocketHandler = {
                 console.log('音频播放结束');
                 break;
             
-            case 'tts_sentence_start':
-            case 'tts_sentence_end':
-                console.log(`收到消息: ${data.type}`, data);
+            case 'tts_start':
+                console.log('开始播放TTS音频, 格式:', data.format);
                 break;
-                
-            case 'stop_audio':
+            
+            case 'tts_end':
+                console.log('TTS音频播放结束');
+                break;
+            
+            case 'tts_stop':
+                console.log('停止TTS音频播放');
+                if (window.AudioProcessor) {
+                    window.AudioProcessor.stopAudio();
+                }
+                break;
+            
             case 'server_interrupt':
             case 'interrupt_acknowledged':
             case 'stop_acknowledged':

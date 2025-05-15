@@ -281,10 +281,10 @@ class MiniMaxTTSService(BaseTTSService):
                 session.is_tts_active = True
                 
                 try:
-                    # 通知客户端开始音频处理
+                    # 发送音频信息
                     await websocket.send_json({
-                        "type": "audio_start",
-                        "format": "raw-16khz-16bit-mono-pcm",  # 16kHz PCM格式
+                        "type": "tts_start",
+                        "format": "raw-16khz-16bit-mono-pcm",
                         "is_first": is_first,
                         "text": text,
                         "session_id": self.session_id
@@ -295,7 +295,7 @@ class MiniMaxTTSService(BaseTTSService):
                     
                     # 发送音频结束标记
                     await websocket.send_json({
-                        "type": "audio_end",
+                        "type": "tts_end",
                         "session_id": self.session_id
                     })
                     

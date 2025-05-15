@@ -40,17 +40,19 @@
 
 #### 服务器到客户端消息
 
-| 消息类型             | 格式                                                                                                    | 用途                  |
-|----------------------|---------------------------------------------------------------------------------------------------------|------------------------|
-| `partial_transcript` | `{"type": "partial_transcript", "content": "文本", "session_id": "会话ID"}`                             | 实时转录字幕           |
-| `final_transcript`   | `{"type": "final_transcript", "content": "文本", "session_id": "会话ID"}`                               | 最终转录结果           |
-| `llm_status`         | `{"type": "llm_status", "status": "processing", "session_id": "会话ID"}`                                | LLM处理状态            |
-| `llm_response`       | `{"type": "llm_response", "content": "文本", "is_complete": true/false, "session_id": "会话ID"}`        | AI文本回复             |
-| `tts_sentence_start` | `{"type": "tts_sentence_start", "sentence_id": "句子ID", "text": "文本", "session_id": "会话ID"}`       | TTS合成开始            |
-| `tts_sentence_end`   | `{"type": "tts_sentence_end", "sentence_id": "句子ID", "session_id": "会话ID"}`                         | TTS合成结束            |
-| `status`             | `{"type": "status", "status": "listening/stopped", "session_id": "会话ID"}`                             | 系统状态更新           |
-| `error`              | `{"type": "error", "message": "错误信息", "session_id": "会话ID"}`                                      | 错误消息               |
-| `server_interrupt`   | `{"type": "server_interrupt", "message": "打断信息", "session_id": "会话ID"}`                           | 服务器端打断通知       |
+| 消息类型                | 格式                                                                                           | 用途                    |
+|-------------------------|------------------------------------------------------------------------------------------------|-------------------------|
+| `partial_transcript`    | `{"type": "partial_transcript", "content": "文本", "session_id": "会话ID"}`                    | 实时转录字幕            |
+| `final_transcript`      | `{"type": "final_transcript", "content": "文本", "session_id": "会话ID"}`                      | 最终转录结果            |
+| `llm_status`            | `{"type": "llm_status", "status": "processing", "session_id": "会话ID"}`                       | LLM处理状态             |
+| `llm_response`          | `{"type": "llm_response", "content": "文本", "is_complete": true/false, "session_id": "会话ID"}` | AI文本回复              |
+| `tts_start`             | `{"type": "tts_start", "format": "格式", "is_first": true/false, "text": "文本", "session_id": "会话ID"}` | TTS音频开始            |
+| `tts_end`               | `{"type": "tts_end", "session_id": "会话ID"}`                                                 | TTS音频结束             |
+| `tts_stop`              | `{"type": "tts_stop", "session_id": "会话ID"}`                                                | 通知客户端停止TTS音频播放 |
+| `status`                | `{"type": "status", "status": "listening/stopped", "session_id": "会话ID"}`                    | 系统状态更新            |
+| `error`                 | `{"type": "error", "message": "错误信息", "session_id": "会话ID"}`                             | 错误消息                |
+| `stop_acknowledged`     | `{"type": "stop_acknowledged", "message": "所有处理已停止", "queues_cleared": true, "session_id": "会话ID"}` | 停止命令确认回复        |
+| `interrupt_acknowledged`| `{"type": "interrupt_acknowledged", "session_id": "会话ID"}`                                  | 中断请求确认回复        |
 
 #### 二进制音频数据
 
@@ -62,8 +64,8 @@
 - 状态标志包含音频能量、麦克风状态等信息
 
 **服务器到客户端**：
-- 格式: `[4字节请求ID][4字节块序号][4字节时间戳][PCM数据]`
-- 允许客户端正确组装和播放流式TTS音频
+- 格式: 直接传输PCM音频数据
+- 配合`tts_start`和`tts_end`消息标记音频流的开始和结束
 
 ### 音频传输规范
 
@@ -78,7 +80,7 @@
 - **音频格式**: 16位PCM
 - **采样率**: 24kHz
 - **声道数**: 单声道
-- **传输协议**: WebSocket JSON消息
+- **传输协议**: WebSocket二进制数据
 
 ### 语音处理
 
@@ -88,6 +90,7 @@
 #### 文本生成(LLM)
 - **支持**:
   - OpenAI API
+  - 兼容的本地服务
 
 #### 语音合成(TTS)
 - **支持引擎**:

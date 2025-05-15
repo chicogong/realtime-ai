@@ -225,7 +225,7 @@ async def stop_tts_and_clear_queues(websocket: WebSocket, session_id: str) -> No
     
     # 通知客户端停止任何音频播放
     await websocket.send_json({
-        "type": "stop_audio",
+        "type": "tts_stop",
         "session_id": session_id
     })
 
