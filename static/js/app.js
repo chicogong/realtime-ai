@@ -6,27 +6,27 @@ import audioProcessor from './audio-processor.js';
 import websocketHandler from './websocket-handler.js';
 
 // 状态变量
-let mediaStream = null;
-let audioScriptProcessor = null;
-let isConversationActive = false;
-let originalSampleRate = 0;
-let resampleRequired = false;
-let isFirstAudioBlock = true;
+let activeMediaStream = null;
+let audioProcessor_node = null;
+let isSessionActive = false;
+let deviceSampleRate = 0;
+let needsResampling = false;
+let isInitialAudioBlock = true;
 
 // DOM元素
-const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
-const resetBtn = document.getElementById('reset-btn');
-const messages = document.getElementById('messages');
-const statusDot = document.getElementById('status-dot');
-const statusText = document.getElementById('status-text');
+const startButton = document.getElementById('start-btn');
+const stopButton = document.getElementById('stop-btn');
+const resetButton = document.getElementById('reset-btn');
+const messagesContainer = document.getElementById('messages');
+const statusIndicatorDot = document.getElementById('status-dot');
+const statusIndicatorText = document.getElementById('status-text');
 
 /**
  * 更新状态指示器
  */
 function updateStatus(state, message) {
-    statusDot.className = state;
-    statusText.textContent = message;
+    statusIndicatorDot.className = state;
+    statusIndicatorText.textContent = message;
 }
 
 /**
@@ -34,7 +34,7 @@ function updateStatus(state, message) {
  */
 async function startConversation() {
     try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        activeMediaStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
@@ -47,24 +47,24 @@ async function startConversation() {
         }
         
         const audioContext = getAudioContext();
-        originalSampleRate = audioContext.sampleRate;
-        resampleRequired = originalSampleRate !== audioProcessor.SAMPLE_RATE;
+        deviceSampleRate = audioContext.sampleRate;
+        needsResampling = deviceSampleRate !== audioProcessor.SAMPLE_RATE;
         
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        audioScriptProcessor = audioContext.createScriptProcessor(
+        const audioSource = audioContext.createMediaStreamSource(activeMediaStream);
+        audioProcessor_node = audioContext.createScriptProcessor(
             audioProcessor.BUFFER_SIZE, 
             audioProcessor.CHANNELS, 
             audioProcessor.CHANNELS
         );
         
-        audioScriptProcessor.onaudioprocess = processUserSpeech;
-        source.connect(audioScriptProcessor);
-        audioScriptProcessor.connect(audioContext.destination);
+        audioProcessor_node.onaudioprocess = processUserSpeech;
+        audioSource.connect(audioProcessor_node);
+        audioProcessor_node.connect(audioContext.destination);
         
-        isConversationActive = true;
+        isSessionActive = true;
         updateStatus('listening', '正在听取...');
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
+        startButton.disabled = true;
+        stopButton.disabled = false;
         
         websocketHandler.sendCommand('start');
     } catch (error) {
@@ -76,28 +76,28 @@ async function startConversation() {
 /**
  * 处理用户语音输入
  */
-function processUserSpeech(e) {
-    if (!isConversationActive || !websocketHandler.getSocket() || 
+function processUserSpeech(event) {
+    if (!isSessionActive || !websocketHandler.getSocket() || 
         websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
     
-    const inputData = e.inputBuffer.getChannelData(0);
-    websocketHandler.checkVoiceInterruption(inputData);
+    const microphoneData = event.inputBuffer.getChannelData(0);
+    websocketHandler.checkVoiceInterruption(microphoneData);
     
-    let audioToProcess = inputData;
-    if (resampleRequired) {
+    let audioToProcess = microphoneData;
+    if (needsResampling) {
         audioToProcess = audioProcessor.downsampleBuffer(
-            inputData, originalSampleRate, audioProcessor.SAMPLE_RATE
+            microphoneData, deviceSampleRate, audioProcessor.SAMPLE_RATE
         );
     }
     
-    const pcmData = audioProcessor.convertFloat32ToInt16(audioToProcess);
+    const pcmAudioData = audioProcessor.convertFloat32ToInt16(audioToProcess);
     
     // 使用WebSocketHandler发送音频数据
-    websocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
+    websocketHandler.sendAudioData(pcmAudioData, isInitialAudioBlock);
     
     // 重置首块标志
-    if (isFirstAudioBlock) {
-        isFirstAudioBlock = false;
+    if (isInitialAudioBlock) {
+        isInitialAudioBlock = false;
     }
 }
 
@@ -105,18 +105,18 @@ function processUserSpeech(e) {
  * 结束语音对话
  */
 function endConversation() {
-    if (!isConversationActive) return;
+    if (!isSessionActive) return;
     
-    isConversationActive = false;
-    isFirstAudioBlock = true;
+    isSessionActive = false;
+    isInitialAudioBlock = true;
     
-    if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
+    if (activeMediaStream) {
+        activeMediaStream.getTracks().forEach(track => track.stop());
     }
     
-    if (audioScriptProcessor) {
-        audioScriptProcessor.disconnect();
-        audioScriptProcessor = null;
+    if (audioProcessor_node) {
+        audioProcessor_node.disconnect();
+        audioProcessor_node = null;
     }
     
     audioProcessor.stopAudioPlayback();
@@ -128,8 +128,8 @@ function endConversation() {
     
     websocketHandler.sendStopAndClearQueues();
     
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
+    startButton.disabled = false;
+    stopButton.disabled = true;
     updateStatus('idle', '已停止');
 }
 
@@ -137,13 +137,13 @@ function endConversation() {
  * 重置对话
  */
 function resetConversation() {
-    if (isConversationActive) {
+    if (isSessionActive) {
         endConversation();
     }
     
     audioProcessor.stopAudioPlayback();
-    messages.innerHTML = '';
-    isFirstAudioBlock = true;
+    messagesContainer.innerHTML = '';
+    isInitialAudioBlock = true;
     websocketHandler.sendCommand('reset');
     updateStatus('idle', '已重置');
 }
@@ -166,11 +166,11 @@ function isAudioPlaying() {
  * 初始化应用
  */
 function init() {
-    websocketHandler.initializeWebSocket(updateStatus, startBtn);
+    websocketHandler.initializeWebSocket(updateStatus, startButton);
     
-    startBtn.addEventListener('click', startConversation);
-    stopBtn.addEventListener('click', endConversation);
-    resetBtn.addEventListener('click', resetConversation);
+    startButton.addEventListener('click', startConversation);
+    stopButton.addEventListener('click', endConversation);
+    resetButton.addEventListener('click', resetConversation);
     
     document.addEventListener('click', () => {
         const audioContext = getAudioContext();
@@ -180,13 +180,13 @@ function init() {
     });
     
     // 添加被动事件监听器以提高性能
-    if (messages) {
-        messages.addEventListener('scroll', () => {}, { passive: true });
+    if (messagesContainer) {
+        messagesContainer.addEventListener('scroll', () => {}, { passive: true });
     }
     
     // 处理页面卸载
     window.addEventListener('beforeunload', () => {
-        if (isConversationActive) endConversation();
+        if (isSessionActive) endConversation();
         
         const socket = websocketHandler.getSocket();
         if (socket) socket.close();

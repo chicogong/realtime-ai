@@ -4,22 +4,22 @@
  */
 
 // 音频配置常量
-const SAMPLE_RATE = 16000;
-const CHANNELS = 1;
-const BUFFER_SIZE = 4096;
+const TARGET_SAMPLE_RATE = 16000;
+const AUDIO_CHANNELS = 1;
+const PROCESSING_BUFFER_SIZE = 4096;
 
 // 音频相关变量
 let audioContext = null;
 let isPlayingAudio = false;
 let currentAudioSource = null;
-let audioBufferQueue = [];
+let pendingAudioQueue = [];
 
 // 音频处理器对象
 const audioProcessor = {
     // 导出配置常量
-    SAMPLE_RATE,
-    CHANNELS,
-    BUFFER_SIZE,
+    SAMPLE_RATE: TARGET_SAMPLE_RATE,
+    CHANNELS: AUDIO_CHANNELS,
+    BUFFER_SIZE: PROCESSING_BUFFER_SIZE,
 
     // 初始化音频上下文
     initAudioContext() {
@@ -54,7 +54,7 @@ const audioProcessor = {
             }
         }
         isPlayingAudio = false;
-        audioBufferQueue = [];
+        pendingAudioQueue = [];
     },
 
     // 是否正在播放
@@ -71,7 +71,7 @@ const audioProcessor = {
         try {
             // 如果有正在播放的音频，加入队列
             if (isPlayingAudio && currentAudioSource) {
-                audioBufferQueue.push(audioData);
+                pendingAudioQueue.push(audioData);
                 return;
             }
             
@@ -80,24 +80,24 @@ const audioProcessor = {
             if (!audioBuffer) return;
             
             // 创建音频源并播放
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
+            const audioSource = audioContext.createBufferSource();
+            audioSource.buffer = audioBuffer;
+            audioSource.connect(audioContext.destination);
             
             // 保存当前音频源
-            currentAudioSource = source;
+            currentAudioSource = audioSource;
             isPlayingAudio = true;
             
             // 添加播放结束事件
-            source.onended = () => {
+            audioSource.onended = () => {
                 currentAudioSource = null;
                 
                 // 播放队列中的下一个，使用微小延迟避免衔接问题
                 // 只有在isPlayingAudio为true时才继续播放队列中的下一项
-                if (isPlayingAudio && audioBufferQueue.length > 0) {
+                if (isPlayingAudio && pendingAudioQueue.length > 0) {
                     setTimeout(() => {
-                        if (isPlayingAudio && audioBufferQueue.length > 0) {
-                            const nextBuffer = audioBufferQueue.shift();
+                        if (isPlayingAudio && pendingAudioQueue.length > 0) {
+                            const nextBuffer = pendingAudioQueue.shift();
                             this.playAudio(nextBuffer);
                         }
                     }, 5);  // 5ms延迟，足够短但有助于音频平滑衔接
@@ -107,15 +107,15 @@ const audioProcessor = {
             };
             
             // 开始播放
-            source.start(0);
+            audioSource.start(0);
         } catch (e) {
             console.error('播放音频错误:', e);
             isPlayingAudio = false;
             
             // 处理下一个音频
-            if (audioBufferQueue.length > 0) {
+            if (pendingAudioQueue.length > 0) {
                 setTimeout(() => {
-                    const nextBuffer = audioBufferQueue.shift();
+                    const nextBuffer = pendingAudioQueue.shift();
                     this.playAudio(nextBuffer);
                 }, 50);  // 增加错误恢复延迟
             }
@@ -145,67 +145,67 @@ const audioProcessor = {
             }
             
             // 获取采样率信息
-            const contextRate = audioContext.sampleRate;
-            const sourceRate = SAMPLE_RATE; // 16000Hz
-            const needsResampling = contextRate !== sourceRate;
+            const deviceSampleRate = audioContext.sampleRate;
+            const targetSampleRate = TARGET_SAMPLE_RATE; // 16000Hz
+            const needsResampling = deviceSampleRate !== targetSampleRate;
             
-            console.log(`PCM转换: 原始采样率=${sourceRate}Hz, 目标采样率=${contextRate}Hz, 数据大小=${pcmData.byteLength}字节, 需要重采样=${needsResampling}, 样本数=${pcmData.byteLength/2}`);
+            console.log(`PCM转换: 原始采样率=${targetSampleRate}Hz, 目标采样率=${deviceSampleRate}Hz, 数据大小=${pcmData.byteLength}字节, 需要重采样=${needsResampling}, 样本数=${pcmData.byteLength/2}`);
             
             // 创建临时AudioBuffer
             const sampleCount = pcmData.byteLength / 2;  // 16位PCM，每样本2字节
             const tempBuffer = audioContext.createBuffer(
                 1,                  // 单声道
                 sampleCount,        // 样本数量
-                sourceRate          // 源采样率
+                targetSampleRate    // 源采样率
             );
             
             // 获取通道数据
-            const tempChannelData = tempBuffer.getChannelData(0);
+            const channelData = tempBuffer.getChannelData(0);
             
             // 将PCM数据转换为Float32Array
             const dataView = new DataView(pcmData);
-            let maxAmp = 0;
-            let minAmp = 0;
+            let maxAmplitude = 0;
+            let minAmplitude = 0;
             
             for (let i = 0; i < sampleCount; i++) {
                 try {
                     // 使用小端序，因为服务器使用小端序（true）
                     const int16Value = dataView.getInt16(i * 2, true);
                     // 标准化到 -1.0 到 1.0 范围
-                    const normVal = int16Value / 32768.0;
-                    tempChannelData[i] = normVal;
+                    const normalizedValue = int16Value / 32768.0;
+                    channelData[i] = normalizedValue;
                     
                     // 跟踪音频电平
-                    maxAmp = Math.max(maxAmp, normVal);
-                    minAmp = Math.min(minAmp, normVal);
+                    maxAmplitude = Math.max(maxAmplitude, normalizedValue);
+                    minAmplitude = Math.min(minAmplitude, normalizedValue);
                 } catch (e) {
                     console.error(`PCM数据处理错误，索引: ${i}, 总长度: ${pcmData.byteLength}`, e);
                     break;
                 }
             }
             
-            console.log(`PCM数据解析完成: 最大振幅=${maxAmp.toFixed(4)}, 最小振幅=${minAmp.toFixed(4)}`);
+            console.log(`PCM数据解析完成: 最大振幅=${maxAmplitude.toFixed(4)}, 最小振幅=${minAmplitude.toFixed(4)}`);
             
             // 如果需要重采样
             if (needsResampling) {
-                console.log(`执行PCM重采样: ${sourceRate}Hz -> ${contextRate}Hz, 样本数: ${sampleCount} -> 约${Math.round(sampleCount * contextRate / sourceRate)}`);
+                console.log(`执行PCM重采样: ${targetSampleRate}Hz -> ${deviceSampleRate}Hz, 样本数: ${sampleCount} -> 约${Math.round(sampleCount * deviceSampleRate / targetSampleRate)}`);
                 
                 // 创建OfflineAudioContext做重采样
-                const offlineContext = new OfflineAudioContext(1, Math.ceil(tempChannelData.length * contextRate / sourceRate), contextRate);
+                const offlineContext = new OfflineAudioContext(1, Math.ceil(channelData.length * deviceSampleRate / targetSampleRate), deviceSampleRate);
                 
                 // 创建BufferSource
-                const source = offlineContext.createBufferSource();
-                source.buffer = tempBuffer;
-                source.connect(offlineContext.destination);
-                source.start();
+                const bufferSource = offlineContext.createBufferSource();
+                bufferSource.buffer = tempBuffer;
+                bufferSource.connect(offlineContext.destination);
+                bufferSource.start();
                 
                 // 执行重采样
                 try {
                     console.time('重采样耗时');
-                    const renderedBuffer = await offlineContext.startRendering();
+                    const resampledBuffer = await offlineContext.startRendering();
                     console.timeEnd('重采样耗时');
-                    console.log(`重采样完成: 新样本数=${renderedBuffer.length}, 持续时间=${renderedBuffer.duration.toFixed(2)}秒`);
-                    return renderedBuffer;
+                    console.log(`重采样完成: 新样本数=${resampledBuffer.length}, 持续时间=${resampledBuffer.duration.toFixed(2)}秒`);
+                    return resampledBuffer;
                 } catch (e) {
                     console.error('重采样失败, 使用原始缓冲区', e);
                     return tempBuffer;
@@ -228,41 +228,41 @@ const audioProcessor = {
         
         const sampleRateRatio = inputSampleRate / outputSampleRate;
         const newLength = Math.round(buffer.length / sampleRateRatio);
-        const result = new Float32Array(newLength);
+        const resultBuffer = new Float32Array(newLength);
         
-        let offsetResult = 0;
-        let offsetBuffer = 0;
+        let resultIndex = 0;
+        let inputIndex = 0;
         
-        while (offsetResult < result.length) {
-            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-            let accum = 0, count = 0;
+        while (resultIndex < resultBuffer.length) {
+            const nextInputIndex = Math.round((resultIndex + 1) * sampleRateRatio);
+            let accumulator = 0, count = 0;
             
-            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-                accum += buffer[i];
+            for (let i = inputIndex; i < nextInputIndex && i < buffer.length; i++) {
+                accumulator += buffer[i];
                 count++;
             }
             
-            result[offsetResult] = accum / count;
-            offsetResult++;
-            offsetBuffer = nextOffsetBuffer;
+            resultBuffer[resultIndex] = accumulator / count;
+            resultIndex++;
+            inputIndex = nextInputIndex;
         }
         
-        return result;
+        return resultBuffer;
     },
 
     // 从Float32转换为Int16 (PCM)
     convertFloat32ToInt16(buffer) {
-        const l = buffer.length;
-        const output = new Int16Array(l);
+        const bufferLength = buffer.length;
+        const outputBuffer = new Int16Array(bufferLength);
         
-        for (let i = 0; i < l; i++) {
+        for (let i = 0; i < bufferLength; i++) {
             // 限制在-1.0 - 1.0范围
-            const s = Math.max(-1, Math.min(1, buffer[i]));
+            const sample = Math.max(-1, Math.min(1, buffer[i]));
             // 转换为16位整数
-            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            outputBuffer[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
         }
         
-        return output;
+        return outputBuffer;
     },
 
     // 计算音频音量

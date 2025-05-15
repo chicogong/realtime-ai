@@ -14,7 +14,7 @@ const websocketHandler = {
     },
 
     // 初始化WebSocket连接
-    initializeWebSocket(updateStatus, startBtn) {
+    initializeWebSocket(updateStatus, startButton) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
@@ -27,7 +27,7 @@ const websocketHandler = {
         this.socket.onopen = () => {
             console.log('WebSocket连接成功');
             updateStatus('idle', '已连接，准备就绪');
-            startBtn.disabled = false;
+            startButton.disabled = false;
             audioProcessor.initAudioContext();
         };
         
@@ -36,11 +36,11 @@ const websocketHandler = {
         this.socket.onclose = () => {
             console.log('WebSocket连接关闭');
             updateStatus('error', '连接已断开');
-            startBtn.disabled = true;
+            startButton.disabled = true;
             
             setTimeout(() => {
                 console.log('尝试重新连接...');
-                this.initializeWebSocket(updateStatus, startBtn);
+                this.initializeWebSocket(updateStatus, startButton);
             }, 5000);
         };
         
@@ -54,9 +54,9 @@ const websocketHandler = {
     _handleSocketMessage(event, updateStatus) {
         try {
             if (typeof event.data === 'string') {
-                const data = JSON.parse(event.data);
-                console.log('收到WebSocket消息:', data.type, data);
-                this.handleMessage(data, updateStatus);
+                const messageData = JSON.parse(event.data);
+                console.log('收到WebSocket消息:', messageData.type, messageData);
+                this.handleMessage(messageData, updateStatus);
             } else if (event.data instanceof Blob) {
                 console.log('收到二进制数据:', event.data.size, '字节');
                 this.handleReceivedAudioData(event.data);
@@ -67,9 +67,9 @@ const websocketHandler = {
     },
 
     // 处理接收到的音频数据
-    async handleReceivedAudioData(blob) {
+    async handleReceivedAudioData(audioBlob) {
         try {
-            const arrayBuffer = await blob.arrayBuffer();
+            const arrayBuffer = await audioBlob.arrayBuffer();
             
             // 检查数据大小
             if (arrayBuffer.byteLength <= 0) {
@@ -135,28 +135,28 @@ const websocketHandler = {
     },
 
     // 处理WebSocket消息
-    handleMessage(data, updateStatus) {
-        const messages = document.getElementById('messages');
+    handleMessage(messageData, updateStatus) {
+        const messagesContainer = document.getElementById('messages');
         
-        switch (data.type) {
+        switch (messageData.type) {
             case 'partial_transcript':
-                this._handleTranscript(data, messages, true);
+                this._handleTranscript(messageData, messagesContainer, true);
                 break;
             
             case 'final_transcript':
-                this._handleTranscript(data, messages, false);
+                this._handleTranscript(messageData, messagesContainer, false);
                 break;
             
             case 'llm_status':
-                this._handleLLMStatus(data, updateStatus, messages);
+                this._handleLLMStatus(messageData, updateStatus, messagesContainer);
                 break;
             
             case 'llm_response':
-                this._handleLLMResponse(data, updateStatus, messages);
+                this._handleLLMResponse(messageData, updateStatus, messagesContainer);
                 break;
                 
             case 'audio_start':
-                console.log('开始播放音频, 格式:', data.format);
+                console.log('开始播放音频, 格式:', messageData.format);
                 break;
                 
             case 'audio_end':
@@ -164,7 +164,7 @@ const websocketHandler = {
                 break;
             
             case 'tts_start':
-                console.log('开始播放TTS音频, 格式:', data.format);
+                console.log('开始播放TTS音频, 格式:', messageData.format);
                 break;
             
             case 'tts_end':
@@ -181,105 +181,105 @@ const websocketHandler = {
             case 'server_interrupt':
             case 'interrupt_acknowledged':
             case 'stop_acknowledged':
-                console.log(`收到消息: ${data.type}`, data);
+                console.log(`收到消息: ${messageData.type}`, messageData);
                 audioProcessor.stopAudioPlayback();
                 break;
                 
             case 'error':
-                console.error(`收到错误消息:`, data);
-                if (data.type === 'error') {
-                    updateStatus('error', data.message || '发生错误');
+                console.error(`收到错误消息:`, messageData);
+                if (messageData.type === 'error') {
+                    updateStatus('error', messageData.message || '发生错误');
                 }
                 break;
                 
             default:
-                console.log(`未处理的消息类型: ${data.type}`, data);
+                console.log(`未处理的消息类型: ${messageData.type}`, messageData);
                 break;
         }
     },
 
     // 处理转录结果（部分或最终）
-    _handleTranscript(data, messages, isPartial) {
-        if (!data.content.trim()) return;
+    _handleTranscript(messageData, messagesContainer, isPartial) {
+        if (!messageData.content.trim()) return;
         
         const bubbleId = isPartial ? 'current-user-bubble' : '';
         let userBubble = document.getElementById('current-user-bubble');
         
         if (userBubble) {
-            userBubble.textContent = data.content;
+            userBubble.textContent = messageData.content;
             if (!isPartial) userBubble.id = '';
         } else {
-            const message = document.createElement('div');
-            message.className = 'message user-message';
-            message.id = bubbleId;
-            message.textContent = data.content;
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message user-message';
+            messageElement.id = bubbleId;
+            messageElement.textContent = messageData.content;
             
-            messages.appendChild(message);
-            messages.scrollTop = messages.scrollHeight;
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
     },
 
     // 处理LLM状态
-    _handleLLMStatus(data, updateStatus, messages) {
-        if (data.status === 'processing') {
+    _handleLLMStatus(messageData, updateStatus, messagesContainer) {
+        if (messageData.status === 'processing') {
             updateStatus('thinking', 'AI思考中...');
             this.isAIResponding = true;
             
             const existingContainer = document.getElementById('ai-message-container');
             if (existingContainer) existingContainer.remove();
             
-            const aiMessage = document.createElement('div');
-            aiMessage.id = 'ai-message-container';
-            aiMessage.className = 'message ai-message';
+            const aiMessageElement = document.createElement('div');
+            aiMessageElement.id = 'ai-message-container';
+            aiMessageElement.className = 'message ai-message';
             
             const typingIndicator = document.createElement('div');
             typingIndicator.className = 'typing-indicator';
             typingIndicator.innerHTML = '<span></span><span></span><span></span>';
             
-            aiMessage.appendChild(typingIndicator);
-            messages.appendChild(aiMessage);
-            messages.scrollTop = messages.scrollHeight;
+            aiMessageElement.appendChild(typingIndicator);
+            messagesContainer.appendChild(aiMessageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
     },
 
     // 处理LLM响应
-    _handleLLMResponse(data, updateStatus, messages) {
-        const aiMessage = document.getElementById('ai-message-container');
+    _handleLLMResponse(messageData, updateStatus, messagesContainer) {
+        const aiMessageElement = document.getElementById('ai-message-container');
         
-        if (aiMessage) {
-            aiMessage.innerHTML = '';
-            aiMessage.textContent = data.content;
+        if (aiMessageElement) {
+            aiMessageElement.innerHTML = '';
+            aiMessageElement.textContent = messageData.content;
             
-            if (data.is_complete) {
-                aiMessage.id = '';
+            if (messageData.is_complete) {
+                aiMessageElement.id = '';
                 updateStatus('idle', '已完成');
                 this.isAIResponding = false;
             } else {
                 const typingIndicator = document.createElement('div');
                 typingIndicator.className = 'typing-indicator';
                 typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                aiMessage.appendChild(typingIndicator);
+                aiMessageElement.appendChild(typingIndicator);
             }
             
-            messages.scrollTop = messages.scrollHeight;
-        } else if (data.is_complete) {
-            const message = document.createElement('div');
-            message.className = 'message ai-message';
-            message.textContent = data.content;
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        } else if (messageData.is_complete) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message ai-message';
+            messageElement.textContent = messageData.content;
             
-            messages.appendChild(message);
-            messages.scrollTop = messages.scrollHeight;
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
             updateStatus('idle', '已完成');
             this.isAIResponding = false;
         }
     },
 
     // 发送命令
-    sendCommand(command, data = {}) {
+    sendCommand(command, commandData = {}) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             const message = {
                 command,
-                ...data
+                ...commandData
             };
             this.socket.send(JSON.stringify(message));
         }
@@ -309,8 +309,8 @@ const websocketHandler = {
             
             // 如果是Float32Array，先计算能量值
             if (pcmData instanceof Float32Array) {
-                const energy = Math.min(255, Math.floor(this._calculateAudioLevel(pcmData) * 1000));
-                statusFlags |= energy & 0xFF;
+                const audioEnergy = Math.min(255, Math.floor(this._calculateAudioLevel(pcmData) * 1000));
+                statusFlags |= audioEnergy & 0xFF;
                 
                 if (pcmData.every(sample => Math.abs(sample) < 0.01)) {
                     statusFlags |= (1 << 8);
@@ -344,10 +344,10 @@ const websocketHandler = {
     // 检查用户是否在AI响应时开始说话
     checkVoiceInterruption(audioData) {
         if (this.isAIResponding && audioProcessor.isPlaying()) {
-            const threshold = 0.03;
+            const volumeThreshold = 0.03;
             const audioLevel = this._calculateAudioLevel(audioData);
             
-            if (audioLevel > threshold) {
+            if (audioLevel > volumeThreshold) {
                 console.log('检测到用户打断，音频能量:', audioLevel);
                 this.sendCommand('interrupt');
             }
@@ -358,12 +358,12 @@ const websocketHandler = {
     _calculateAudioLevel(audioData) {
         if (!audioData || audioData.length === 0) return 0;
         
-        let sum = 0;
+        let totalAmplitude = 0;
         for (let i = 0; i < audioData.length; i++) {
-            sum += Math.abs(audioData[i]);
+            totalAmplitude += Math.abs(audioData[i]);
         }
         
-        return sum / audioData.length;
+        return totalAmplitude / audioData.length;
     }
 };
 
