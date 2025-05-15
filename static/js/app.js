@@ -1,5 +1,5 @@
 /**
- * 主应用脚本
+ * 实时语音对话主控制模块
  */
 
 import audioProcessor from './audio-processor.js';
@@ -7,8 +7,8 @@ import websocketHandler from './websocket-handler.js';
 
 // 状态变量
 let mediaStream = null;
-let processor = null;
-let isRecording = false;
+let audioScriptProcessor = null;
+let isConversationActive = false;
 let originalSampleRate = 0;
 let resampleRequired = false;
 let isFirstAudioBlock = true;
@@ -30,9 +30,9 @@ function updateStatus(state, message) {
 }
 
 /**
- * 开始录音
+ * 开始语音对话
  */
-async function startRecording() {
+async function startConversation() {
     try {
         mediaStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
@@ -51,17 +51,17 @@ async function startRecording() {
         resampleRequired = originalSampleRate !== audioProcessor.SAMPLE_RATE;
         
         const source = audioContext.createMediaStreamSource(mediaStream);
-        processor = audioContext.createScriptProcessor(
+        audioScriptProcessor = audioContext.createScriptProcessor(
             audioProcessor.BUFFER_SIZE, 
             audioProcessor.CHANNELS, 
             audioProcessor.CHANNELS
         );
         
-        processor.onaudioprocess = processAudio;
-        source.connect(processor);
-        processor.connect(audioContext.destination);
+        audioScriptProcessor.onaudioprocess = processUserSpeech;
+        source.connect(audioScriptProcessor);
+        audioScriptProcessor.connect(audioContext.destination);
         
-        isRecording = true;
+        isConversationActive = true;
         updateStatus('listening', '正在听取...');
         startBtn.disabled = true;
         stopBtn.disabled = false;
@@ -74,10 +74,10 @@ async function startRecording() {
 }
 
 /**
- * 处理音频数据
+ * 处理用户语音输入
  */
-function processAudio(e) {
-    if (!isRecording || !websocketHandler.getSocket() || 
+function processUserSpeech(e) {
+    if (!isConversationActive || !websocketHandler.getSocket() || 
         websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
     
     const inputData = e.inputBuffer.getChannelData(0);
@@ -102,21 +102,21 @@ function processAudio(e) {
 }
 
 /**
- * 停止录音
+ * 结束语音对话
  */
-function stopRecording() {
-    if (!isRecording) return;
+function endConversation() {
+    if (!isConversationActive) return;
     
-    isRecording = false;
+    isConversationActive = false;
     isFirstAudioBlock = true;
     
     if (mediaStream) {
         mediaStream.getTracks().forEach(track => track.stop());
     }
     
-    if (processor) {
-        processor.disconnect();
-        processor = null;
+    if (audioScriptProcessor) {
+        audioScriptProcessor.disconnect();
+        audioScriptProcessor = null;
     }
     
     audioProcessor.stopAudioPlayback();
@@ -134,11 +134,11 @@ function stopRecording() {
 }
 
 /**
- * 重置会话
+ * 重置对话
  */
-function resetSession() {
-    if (isRecording) {
-        stopRecording();
+function resetConversation() {
+    if (isConversationActive) {
+        endConversation();
     }
     
     audioProcessor.stopAudioPlayback();
@@ -168,9 +168,9 @@ function isAudioPlaying() {
 function init() {
     websocketHandler.initializeWebSocket(updateStatus, startBtn);
     
-    startBtn.addEventListener('click', startRecording);
-    stopBtn.addEventListener('click', stopRecording);
-    resetBtn.addEventListener('click', resetSession);
+    startBtn.addEventListener('click', startConversation);
+    stopBtn.addEventListener('click', endConversation);
+    resetBtn.addEventListener('click', resetConversation);
     
     document.addEventListener('click', () => {
         const audioContext = getAudioContext();
@@ -186,7 +186,7 @@ function init() {
     
     // 处理页面卸载
     window.addEventListener('beforeunload', () => {
-        if (isRecording) stopRecording();
+        if (isConversationActive) endConversation();
         
         const socket = websocketHandler.getSocket();
         if (socket) socket.close();
