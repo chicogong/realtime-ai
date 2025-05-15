@@ -2,8 +2,8 @@
  * 主应用脚本
  */
 
-import AudioProcessor from './audio-processor.js';
-import WebSocketHandler from './websocket-handler.js';
+import audioProcessor from './audio-processor.js';
+import websocketHandler from './websocket-handler.js';
 
 // 状态变量
 let mediaStream = null;
@@ -42,19 +42,19 @@ async function startRecording() {
             } 
         });
         
-        if (!AudioProcessor.initAudioContext()) {
+        if (!audioProcessor.initAudioContext()) {
             throw new Error('无法初始化音频上下文');
         }
         
         const audioContext = getAudioContext();
         originalSampleRate = audioContext.sampleRate;
-        resampleRequired = originalSampleRate !== AudioProcessor.SAMPLE_RATE;
+        resampleRequired = originalSampleRate !== audioProcessor.SAMPLE_RATE;
         
         const source = audioContext.createMediaStreamSource(mediaStream);
         processor = audioContext.createScriptProcessor(
-            AudioProcessor.BUFFER_SIZE, 
-            AudioProcessor.CHANNELS, 
-            AudioProcessor.CHANNELS
+            audioProcessor.BUFFER_SIZE, 
+            audioProcessor.CHANNELS, 
+            audioProcessor.CHANNELS
         );
         
         processor.onaudioprocess = processAudio;
@@ -66,7 +66,7 @@ async function startRecording() {
         startBtn.disabled = true;
         stopBtn.disabled = false;
         
-        WebSocketHandler.sendCommand('start');
+        websocketHandler.sendCommand('start');
     } catch (error) {
         console.error('麦克风访问错误:', error);
         updateStatus('error', '麦克风访问错误');
@@ -77,23 +77,23 @@ async function startRecording() {
  * 处理音频数据
  */
 function processAudio(e) {
-    if (!isRecording || !WebSocketHandler.getSocket() || 
-        WebSocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
+    if (!isRecording || !websocketHandler.getSocket() || 
+        websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
     
     const inputData = e.inputBuffer.getChannelData(0);
-    WebSocketHandler.checkVoiceInterruption(inputData);
+    websocketHandler.checkVoiceInterruption(inputData);
     
     let audioToProcess = inputData;
     if (resampleRequired) {
-        audioToProcess = AudioProcessor.downsampleBuffer(
-            inputData, originalSampleRate, AudioProcessor.SAMPLE_RATE
+        audioToProcess = audioProcessor.downsampleBuffer(
+            inputData, originalSampleRate, audioProcessor.SAMPLE_RATE
         );
     }
     
-    const pcmData = AudioProcessor.convertFloat32ToInt16(audioToProcess);
+    const pcmData = audioProcessor.convertFloat32ToInt16(audioToProcess);
     
     // 使用WebSocketHandler发送音频数据
-    WebSocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
+    websocketHandler.sendAudioData(pcmData, isFirstAudioBlock);
     
     // 重置首块标志
     if (isFirstAudioBlock) {
@@ -119,14 +119,14 @@ function stopRecording() {
         processor = null;
     }
     
-    AudioProcessor.stopAudioPlayback();
+    audioProcessor.stopAudioPlayback();
     
     const audioContext = getAudioContext();
     if (audioContext && audioContext.state === "running" && !isAudioPlaying()) {
         audioContext.suspend().catch(console.error);
     }
     
-    WebSocketHandler.sendStopAndClearQueues();
+    websocketHandler.sendStopAndClearQueues();
     
     startBtn.disabled = false;
     stopBtn.disabled = true;
@@ -141,10 +141,10 @@ function resetSession() {
         stopRecording();
     }
     
-    AudioProcessor.stopAudioPlayback();
+    audioProcessor.stopAudioPlayback();
     messages.innerHTML = '';
     isFirstAudioBlock = true;
-    WebSocketHandler.sendCommand('reset');
+    websocketHandler.sendCommand('reset');
     updateStatus('idle', '已重置');
 }
 
@@ -152,21 +152,21 @@ function resetSession() {
  * 获取音频上下文
  */
 function getAudioContext() {
-    return AudioProcessor ? AudioProcessor.getAudioContext() : null;
+    return audioProcessor ? audioProcessor.getAudioContext() : null;
 }
 
 /**
  * 检查是否正在播放音频
  */
 function isAudioPlaying() {
-    return AudioProcessor ? AudioProcessor.isPlaying() : false;
+    return audioProcessor ? audioProcessor.isPlaying() : false;
 }
 
 /**
  * 初始化应用
  */
 function init() {
-    WebSocketHandler.initializeWebSocket(updateStatus, startBtn);
+    websocketHandler.initializeWebSocket(updateStatus, startBtn);
     
     startBtn.addEventListener('click', startRecording);
     stopBtn.addEventListener('click', stopRecording);
@@ -188,7 +188,7 @@ function init() {
     window.addEventListener('beforeunload', () => {
         if (isRecording) stopRecording();
         
-        const socket = WebSocketHandler.getSocket();
+        const socket = websocketHandler.getSocket();
         if (socket) socket.close();
         
         const audioContext = getAudioContext();

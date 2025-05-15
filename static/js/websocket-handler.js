@@ -2,9 +2,9 @@
  * WebSocket处理模块
  */
 
-import AudioProcessor from './audio-processor.js';
+import audioProcessor from './audio-processor.js';
 
-const WebSocketHandler = {
+const websocketHandler = {
     socket: null,
     isAIResponding: false,
 
@@ -28,7 +28,7 @@ const WebSocketHandler = {
             console.log('WebSocket连接成功');
             updateStatus('idle', '已连接，准备就绪');
             startBtn.disabled = false;
-            AudioProcessor.initAudioContext();
+            audioProcessor.initAudioContext();
         };
         
         this.socket.onmessage = (event) => this._handleSocketMessage(event, updateStatus);
@@ -105,7 +105,7 @@ const WebSocketHandler = {
                 // 如果有有效数据，则发送到音频处理器播放
                 if (audioData.byteLength > 0) {
                     console.log(`播放音频块: ${audioData.byteLength}字节`);
-                    AudioProcessor.playAudio(audioData);
+                    audioProcessor.playAudio(audioData);
                 } else {
                     console.warn('处理后音频数据为空，跳过播放');
                 }
@@ -124,7 +124,7 @@ const WebSocketHandler = {
                 // 播放音频
                 if (audioData.byteLength > 0) {
                     console.log(`播放直接PCM音频: ${audioData.byteLength}字节`);
-                    AudioProcessor.playAudio(audioData);
+                    audioProcessor.playAudio(audioData);
                 } else {
                     console.warn('处理后直接PCM音频数据为空，跳过播放');
                 }
@@ -173,8 +173,8 @@ const WebSocketHandler = {
             
             case 'tts_stop':
                 console.log('停止TTS音频播放');
-                if (AudioProcessor) {
-                    AudioProcessor.stopAudio();
+                if (audioProcessor) {
+                    audioProcessor.stopAudio();
                 }
                 break;
             
@@ -182,7 +182,7 @@ const WebSocketHandler = {
             case 'interrupt_acknowledged':
             case 'stop_acknowledged':
                 console.log(`收到消息: ${data.type}`, data);
-                AudioProcessor.stopAudioPlayback();
+                audioProcessor.stopAudioPlayback();
                 break;
                 
             case 'error':
@@ -343,7 +343,7 @@ const WebSocketHandler = {
 
     // 检查用户是否在AI响应时开始说话
     checkVoiceInterruption(audioData) {
-        if (this.isAIResponding && AudioProcessor.isPlaying()) {
+        if (this.isAIResponding && audioProcessor.isPlaying()) {
             const threshold = 0.03;
             const audioLevel = this._calculateAudioLevel(audioData);
             
@@ -368,4 +368,4 @@ const WebSocketHandler = {
 };
 
 // 使用ES模块导出
-export default WebSocketHandler; 
+export default websocketHandler; 

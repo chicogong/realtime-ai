@@ -15,7 +15,7 @@ let currentAudioSource = null;
 let audioBufferQueue = [];
 
 // 音频处理器对象
-const AudioProcessor = {
+const audioProcessor = {
     // 导出配置常量
     SAMPLE_RATE,
     CHANNELS,
@@ -279,4 +279,4 @@ const AudioProcessor = {
 };
 
 // 使用ES模块导出
-export default AudioProcessor; 
+export default audioProcessor; 
