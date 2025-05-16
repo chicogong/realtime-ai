@@ -2,14 +2,14 @@ import asyncio
 import json
 import struct
 import time
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, Union
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from config import Config
 from models.session import get_all_sessions, get_session, remove_session
-from services.asr import create_asr_service
+from services.asr import create_asr_service, BaseASRService
 from services.llm import create_llm_service
 from services.tts import close_all_tts_services, create_tts_service
 from utils.audio import VoiceActivityDetector, parse_audio_header
@@ -20,10 +20,10 @@ class AudioProcessor:
     """处理音频相关的功能"""
 
     def __init__(self) -> None:
-        self.last_audio_log_time = 0
-        self.audio_packets_received = 0
+        self.last_audio_log_time: float = 0.0
+        self.audio_packets_received: int = 0
         self.voice_detector = VoiceActivityDetector()
-        self.AUDIO_LOG_INTERVAL = 5.0
+        self.AUDIO_LOG_INTERVAL: float = 5.0
 
     def process_audio_data(self, audio_data: bytes, session: Any) -> Tuple[bool, Optional[bytes]]:
         """处理音频数据，返回是否有语音活动和PCM数据"""
@@ -250,7 +250,13 @@ class WebSocketHandler:
         await websocket.accept()
 
         loop = asyncio.get_running_loop()
-        session_id = get_session(None).session_id
+        session = get_session(None)
+        if not session:
+            logger.error("无法获取会话，关闭连接")
+            await websocket.close()
+            return
+            
+        session_id = session.session_id
         logger.info(f"新WebSocket连接已建立，会话ID: {session_id}")
 
         session = get_session(session_id)
@@ -272,7 +278,7 @@ class WebSocketHandler:
         finally:
             await self._cleanup(websocket, asr_service, session_id)
 
-    async def _setup_asr_service(self, websocket: WebSocket, session_id: str, loop: Any) -> Optional[Any]:
+    async def _setup_asr_service(self, websocket: WebSocket, session_id: str, loop: Any) -> Optional[BaseASRService]:
         """设置ASR服务"""
         asr_service = create_asr_service()
         if not asr_service:
@@ -281,9 +287,11 @@ class WebSocketHandler:
             return None
 
         session = get_session(session_id)
-        session.asr_recognizer = asr_service
-        asr_service.set_websocket(websocket, loop, session_id)
-        asr_service.setup_handlers()
+        if session:
+            logger.info(f"设置ASR服务，会话ID: {session_id}")
+            session.asr_recognizer = asr_service
+            asr_service.set_websocket(websocket, loop, session_id)
+            asr_service.setup_handlers()
         return asr_service
 
     async def _handle_messages(self, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
@@ -399,7 +407,7 @@ class SessionCleaner:
     """处理会话清理任务"""
 
     @staticmethod
-    async def cleanup_inactive_sessions():
+    async def cleanup_inactive_sessions() -> None:
         """定期清理不活跃的会话"""
         while True:
             try:
