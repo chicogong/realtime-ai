@@ -13,7 +13,7 @@ class BaseTTSService(ABC):
 
     def __init__(self) -> None:
         """初始化TTS服务"""
-        self.session_id = None
+        self.session_id: Optional[str] = None
 
     def set_session_id(self, session_id: str) -> None:
         """设置会话ID

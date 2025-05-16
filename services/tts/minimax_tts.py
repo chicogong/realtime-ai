@@ -39,8 +39,8 @@ class MiniMaxTTSService(BaseTTSService):
         self.group_id = ""  # 组ID，可能为空
 
         self.is_processing = False
-        self.send_queue = asyncio.Queue()  # 用于发送数据的队列
-        self.send_task = None
+        self.send_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()  # 用于发送数据的队列
+        self.send_task: Optional[asyncio.Task[None]] = None
 
         # 网络延迟和首帧延迟
         self.network_latency = 0

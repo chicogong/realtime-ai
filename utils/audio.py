@@ -1,6 +1,6 @@
 import struct
 import time
-from typing import Tuple
+from typing import Tuple, Optional
 
 from loguru import logger
 
@@ -16,7 +16,7 @@ class AudioDiagnostics:
         self.chunks_received = 0
         self.last_report_time = time.time()
         self.report_interval = 5  # 报告间隔（秒）
-        self.first_chunk = None
+        self.first_chunk: Optional[bytes] = None
 
     def record_chunk(self, chunk: bytes) -> None:
         """记录音频块信息

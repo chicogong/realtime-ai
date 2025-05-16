@@ -32,8 +32,8 @@ class AzureTTSService(BaseTTSService):
         self.region = region
         self.voice_name = voice_name
         self.is_processing = False
-        self.send_queue = asyncio.Queue()  # 用于发送数据的队列
-        self.send_task = None
+        self.send_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()  # 用于发送数据的队列
+        self.send_task: Optional[asyncio.Task[None]] = None
 
         logger.info(f"Azure TTS服务初始化: 语音={voice_name}")
 
