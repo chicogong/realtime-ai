@@ -12,7 +12,7 @@ from utils.audio import AudioDiagnostics
 class AzureASRService(BaseASRService):
     """Azure语音识别服务实现"""
 
-    def __init__(self, subscription_key: str, region: str, language: str = "zh-CN"):
+    def __init__(self, subscription_key: str, region: str, language: str = "zh-CN") -> None:
         """初始化Azure ASR服务
 
         Args:

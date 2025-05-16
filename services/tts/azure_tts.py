@@ -19,7 +19,7 @@ class AzureTTSService(BaseTTSService):
     _http_client = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
-    def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE):
+    def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE) -> None:
         """初始化Azure TTS服务
 
         Args:

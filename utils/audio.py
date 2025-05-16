@@ -10,7 +10,7 @@ from config import Config
 class AudioDiagnostics:
     """音频问题诊断辅助类"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化音频诊断工具"""
         self.total_bytes = 0
         self.chunks_received = 0
@@ -94,7 +94,7 @@ class AudioDiagnostics:
 class VoiceActivityDetector:
     """检测用户语音活动"""
 
-    def __init__(self, energy_threshold: float = Config.VOICE_ENERGY_THRESHOLD):
+    def __init__(self, energy_threshold: float = Config.VOICE_ENERGY_THRESHOLD) -> None:
         """初始化语音活动检测器
 
         Args:

@@ -9,7 +9,7 @@ from loguru import logger
 class BaseASRService(ABC):
     """Abstract base class for speech recognition services"""
 
-    def __init__(self, language: str = "en-US"):
+    def __init__(self, language: str = "en-US") -> None:
         self.language = language
         self.is_recognizing = False
         self.websocket: Optional[WebSocket] = None

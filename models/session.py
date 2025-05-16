@@ -8,7 +8,7 @@ from loguru import logger
 class SessionState:
     """Manages user session state"""
 
-    def __init__(self, session_id: str = None):
+    def __init__(self, session_id: str = None) -> None:
         self.session_id = session_id or str(uuid.uuid4())
         self.is_processing_llm = False
         self.is_tts_active = False

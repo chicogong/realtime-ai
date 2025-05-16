@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class BaseTTSService(ABC):
     """TTS服务的抽象基类，定义所有TTS服务必须实现的接口"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化TTS服务"""
         self.session_id = None
 

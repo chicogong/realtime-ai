@@ -21,7 +21,7 @@ class MiniMaxTTSService(BaseTTSService):
     _http_client = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
-    def __init__(self, api_key: str, voice_id: str = "male-qn-qingse"):
+    def __init__(self, api_key: str, voice_id: str = "male-qn-qingse") -> None:
         """初始化MiniMax TTS服务
 
         Args:

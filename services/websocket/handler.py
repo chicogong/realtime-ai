@@ -19,7 +19,7 @@ from utils.text import split_into_sentences
 class AudioProcessor:
     """处理音频相关的功能"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.last_audio_log_time = 0
         self.audio_packets_received = 0
         self.voice_detector = VoiceActivityDetector()

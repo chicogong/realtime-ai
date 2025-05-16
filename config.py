@@ -47,7 +47,7 @@ class Config:
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
     @classmethod
-    def validate(cls):
+    def validate(cls) -> bool:
         """Validate required configuration"""
         # Validate ASR config
         if cls.ASR_PROVIDER == "azure" and (not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION):
