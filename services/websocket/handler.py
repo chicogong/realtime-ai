@@ -2,13 +2,13 @@ import asyncio
 import json
 import struct
 import time
-from typing import Any, Dict, Optional, Tuple, List, Union
+from typing import Any, Dict, Optional, Tuple, List, Union, cast
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from config import Config
-from models.session import get_all_sessions, get_session, remove_session
+from models.session import get_all_sessions, get_session, remove_session, SessionState
 from services.asr import create_asr_service, BaseASRService
 from services.llm import create_llm_service
 from services.tts import close_all_tts_services, create_tts_service
@@ -250,7 +250,7 @@ class WebSocketHandler:
         await websocket.accept()
 
         loop = asyncio.get_running_loop()
-        session = get_session(None)
+        session = get_session("")  # 使用空字符串代替 None
         if not session:
             logger.error("无法获取会话，关闭连接")
             await websocket.close()
@@ -260,6 +260,13 @@ class WebSocketHandler:
         logger.info(f"新WebSocket连接已建立，会话ID: {session_id}")
 
         session = get_session(session_id)
+        if not session:
+            logger.error(f"无法获取会话 {session_id}，关闭连接")
+            await websocket.close()
+            return
+        else:
+            logger.info(f"获取会话 {session_id} 成功")
+
         asr_service = await self._setup_asr_service(websocket, session_id, loop)
         if not asr_service:
             return
@@ -289,28 +296,33 @@ class WebSocketHandler:
         session = get_session(session_id)
         if session:
             logger.info(f"设置ASR服务，会话ID: {session_id}")
-            session.asr_recognizer = asr_service
+            session.asr_recognizer = cast(BaseASRService, asr_service)  # 使用 cast 来确保类型安全
             asr_service.set_websocket(websocket, loop, session_id)
             asr_service.setup_handlers()
         return asr_service
 
-    async def _handle_messages(self, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
+    async def _handle_messages(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """处理WebSocket消息"""
         while True:
-            data = await websocket.receive()
+            try:
+                data = await websocket.receive()
+                if "bytes" in data:
+                    await self._handle_audio_data(data["bytes"], asr_service, session_id)
+                elif "text" in data:
+                    await self._handle_text_command(data["text"], websocket, asr_service, session_id)
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"处理消息错误: {e}")
+                break
 
-            if "bytes" in data:
-                await self._handle_audio_data(data["bytes"], asr_service, session_id)
-            elif "text" in data:
-                await self._handle_text_command(data["text"], websocket, asr_service, session_id)
-
-    async def _handle_audio_data(self, audio_data: bytes, asr_service: Any, session_id: str) -> None:
+    async def _handle_audio_data(self, audio_data: bytes, asr_service: BaseASRService, session_id: str) -> None:
         """处理音频数据"""
         has_voice, pcm_data = self.audio_processor.process_audio_data(audio_data, get_session(session_id))
 
         if pcm_data:
             session = get_session(session_id)
-            if has_voice and (session.is_tts_active or session.is_processing_llm):
+            if session and has_voice and (session.is_tts_active or session.is_processing_llm):
                 if self.audio_processor.voice_detector.has_continuous_voice():
                     logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
                     await self._stop_tts_and_clear_queues(websocket, session_id)
@@ -318,7 +330,7 @@ class WebSocketHandler:
 
             asr_service.feed_audio(pcm_data)
 
-    async def _handle_text_command(self, text: str, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
+    async def _handle_text_command(self, text: str, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """处理文本命令"""
         try:
             message = json.loads(text)
@@ -337,7 +349,7 @@ class WebSocketHandler:
             logger.error(f"处理命令错误: {e}")
             await websocket.send_json({"type": "error", "message": f"命令错误: {str(e)}"})
 
-    async def _handle_stop_command(self, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
+    async def _handle_stop_command(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """处理停止命令"""
         await asr_service.stop_recognition()
         logger.info(f"停止命令接收，停止所有TTS和LLM进程，会话ID: {session_id}")
@@ -346,7 +358,7 @@ class WebSocketHandler:
             {"type": "stop_acknowledged", "message": "所有处理已停止", "queues_cleared": True, "session_id": session_id}
         )
 
-    async def _handle_reset_command(self, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
+    async def _handle_reset_command(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """处理重置命令"""
         await asr_service.stop_recognition()
         await asyncio.sleep(1)
@@ -354,11 +366,12 @@ class WebSocketHandler:
         new_asr_service = create_asr_service()
         if new_asr_service:
             session = get_session(session_id)
-            session.asr_recognizer = new_asr_service
-            new_asr_service.set_websocket(websocket, asyncio.get_running_loop(), session_id)
-            new_asr_service.setup_handlers()
-            await new_asr_service.start_recognition()
-            asr_service = new_asr_service
+            if session:
+                session.asr_recognizer = cast(BaseASRService, new_asr_service)
+                new_asr_service.set_websocket(websocket, asyncio.get_running_loop(), session_id)
+                new_asr_service.setup_handlers()
+                await new_asr_service.start_recognition()
+                asr_service = new_asr_service
         else:
             await websocket.send_json({"type": "error", "message": "无法创建新的ASR服务", "session_id": session_id})
 
@@ -366,41 +379,47 @@ class WebSocketHandler:
         """处理中断命令"""
         logger.info(f"接收到中断命令，会话ID: {session_id}")
         session = get_session(session_id)
-        session.request_interrupt()
-        await self._stop_tts_and_clear_queues(websocket, session_id)
-        await websocket.send_json({"type": "interrupt_acknowledged", "session_id": session_id})
+        if session:
+            session.request_interrupt()
+            await self._stop_tts_and_clear_queues(websocket, session_id)
+            await websocket.send_json({"type": "interrupt_acknowledged", "session_id": session_id})
+        else:
+            logger.error(f"无法获取会话 {session_id}，无法处理中断命令")
 
     async def _stop_tts_and_clear_queues(self, websocket: WebSocket, session_id: str) -> None:
         """停止TTS响应并清空所有队列"""
         session = get_session(session_id)
-        session.request_interrupt()
+        if session:
+            session.request_interrupt()
+            if session.tts_processor:
+                await session.tts_processor.interrupt()
+            await websocket.send_json({"type": "tts_stop", "session_id": session_id})
+        else:
+            logger.error(f"无法获取会话 {session_id}，无法停止TTS")
 
-        if session.tts_processor:
-            await session.tts_processor.interrupt()
-
-        await websocket.send_json({"type": "tts_stop", "session_id": session_id})
-
-    async def _cleanup(self, websocket: WebSocket, asr_service: Any, session_id: str) -> None:
+    async def _cleanup(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """清理资源"""
         if asr_service:
             try:
                 await asr_service.stop_recognition()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"停止ASR服务错误: {e}")
 
         session = get_session(session_id)
-        try:
-            if session.tts_processor:
+        if session and session.tts_processor:
+            try:
                 await session.tts_processor.close()
-        except:
-            pass
+            except Exception as e:
+                logger.error(f"关闭TTS服务错误: {e}")
+        else:
+            logger.error(f"无法获取会话 {session_id}，无法关闭TTS")
 
         remove_session(session_id)
 
         try:
             await websocket.close()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"关闭WebSocket连接错误: {e}")
 
 
 class SessionCleaner:
