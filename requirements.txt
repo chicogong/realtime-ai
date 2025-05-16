@@ -8,3 +8,6 @@ async-timeout>=4.0.3
 websockets>=11.0.3
 loguru>=0.7.3 
 async-timeout>=4.0.3
+# 开发依赖（本地开发和类型检查用）
+mypy>=1.15.0
+typing-inspection>=0.4.0
