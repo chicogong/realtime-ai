@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 
 import azure.cognitiveservices.speech as speechsdk
 from loguru import logger
@@ -23,8 +23,8 @@ class AzureASRService(BaseASRService):
         super().__init__(language)
         self.subscription_key = subscription_key
         self.region = region
-        self.push_stream = None
-        self.recognizer = None
+        self.push_stream: Optional[speechsdk.audio.PushAudioInputStream] = None
+        self.recognizer: Optional[speechsdk.SpeechRecognizer] = None
         self.audio_diagnostics = AudioDiagnostics()
 
         # 初始化识别器
@@ -54,6 +54,10 @@ class AzureASRService(BaseASRService):
 
     def setup_handlers(self) -> None:
         """设置识别事件处理程序"""
+        if self.recognizer is None:
+            logger.error("识别器未初始化")
+            return
+
         # 识别中事件（部分结果）
         self.recognizer.recognizing.connect(self._on_recognizing)
 
@@ -69,19 +73,19 @@ class AzureASRService(BaseASRService):
         self.recognizer.speech_start_detected.connect(self._on_speech_start_detected)
         self.recognizer.speech_end_detected.connect(self._on_speech_end_detected)
 
-    def _on_session_started(self, evt) -> None:
+    def _on_session_started(self, evt: speechsdk.SessionEventArgs) -> None:
         """会话开始事件处理"""
         logger.info(f"语音识别会话已开始: {evt}")
 
-    def _on_speech_start_detected(self, evt) -> None:
+    def _on_speech_start_detected(self, evt: speechsdk.RecognitionEventArgs) -> None:
         """语音开始事件处理"""
         logger.info("检测到语音开始")
 
-    def _on_speech_end_detected(self, evt) -> None:
+    def _on_speech_end_detected(self, evt: speechsdk.RecognitionEventArgs) -> None:
         """语音结束事件处理"""
         logger.info("检测到语音结束")
 
-    def _on_recognizing(self, evt) -> None:
+    def _on_recognizing(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """处理部分识别结果"""
         text = evt.result.text
         logger.info(f"部分识别: '{text}'")
@@ -93,12 +97,12 @@ class AzureASRService(BaseASRService):
         # 通过WebSocket发送部分识别结果
         if self.websocket and self.loop and text.strip():
 
-            async def send_partial():
+            async def send_partial() -> None:
                 await self.send_partial_transcript(text)
 
             asyncio.run_coroutine_threadsafe(send_partial(), self.loop)
 
-    def _on_recognized(self, evt) -> None:
+    def _on_recognized(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """处理最终识别结果"""
         text = evt.result.text
         logger.info(f"最终识别: '{text}'")
@@ -107,12 +111,12 @@ class AzureASRService(BaseASRService):
         if text.strip() and self.websocket and self.loop:
             from services.websocket.handler import process_final_transcript
 
-            async def process_and_send_final():
+            async def process_and_send_final() -> None:
                 # 发送最终识别结果
                 await self.send_final_transcript(text)
 
                 # 处理文本并生成AI响应
-                if text.strip():
+                if text.strip() and self.websocket is not None:
                     await process_final_transcript(self.websocket, text, self.session_id)
 
             asyncio.run_coroutine_threadsafe(process_and_send_final(), self.loop)
@@ -122,7 +126,7 @@ class AzureASRService(BaseASRService):
         elif not text.strip():
             logger.info("识别结果为空，未检测到文本")
 
-    def _on_canceled(self, evt) -> None:
+    def _on_canceled(self, evt: speechsdk.SpeechRecognitionCanceledEventArgs) -> None:
         """处理取消和错误"""
         logger.error(f"识别已取消: {evt.result.reason}")
 
@@ -133,7 +137,7 @@ class AzureASRService(BaseASRService):
         # 通知客户端
         if self.websocket and self.loop:
 
-            async def send_error():
+            async def send_error() -> None:
                 error_message = "错误: "
                 if evt.result.reason == speechsdk.CancellationReason.Error:
                     error_message += evt.result.cancellation_details.error_details
@@ -146,7 +150,7 @@ class AzureASRService(BaseASRService):
 
         self.is_recognizing = False
 
-    def _on_session_stopped(self, evt) -> None:
+    def _on_session_stopped(self, evt: speechsdk.SessionEventArgs) -> None:
         """处理会话停止事件"""
         logger.info("语音识别会话已停止")
 
@@ -154,14 +158,15 @@ class AzureASRService(BaseASRService):
         if self.websocket and self.loop and self.last_partial_result.strip():
             from services.websocket.handler import process_final_transcript
 
-            async def send_final_from_partial():
+            async def send_final_from_partial() -> None:
                 logger.info(f"使用最后的部分结果作为最终结果: '{self.last_partial_result}'")
 
                 # 发送最后的部分结果作为最终结果
                 await self.send_final_transcript(self.last_partial_result)
 
                 # 处理响应
-                await process_final_transcript(self.websocket, self.last_partial_result, self.session_id)
+                if self.websocket is not None:
+                    await process_final_transcript(self.websocket, self.last_partial_result, self.session_id)
 
                 # 清除部分结果
                 self.last_partial_result = ""
@@ -171,7 +176,7 @@ class AzureASRService(BaseASRService):
         # 更新客户端状态
         if self.websocket and self.loop:
 
-            async def send_status():
+            async def send_status() -> None:
                 await self.send_status("stopped")
 
             asyncio.run_coroutine_threadsafe(send_status(), self.loop)
@@ -226,14 +231,17 @@ class AzureASRService(BaseASRService):
         """在单独的线程中启动连续识别"""
         try:
             # 启动连续识别
-            self.recognizer.start_continuous_recognition()
+            if self.recognizer is not None:
+                self.recognizer.start_continuous_recognition()
+            else:
+                logger.error("识别器未初始化")
         except Exception as e:
             logger.error(f"连续识别启动错误: {e}")
 
             # 通知主线程有错误
             if self.loop:
 
-                async def send_error():
+                async def send_error() -> None:
                     await self.send_error(f"连续识别启动错误: {str(e)}")
                     self.is_recognizing = False
 
@@ -264,15 +272,18 @@ class AzureASRService(BaseASRService):
         """在单独的线程中停止连续识别"""
         try:
             # 停止连续识别
-            self.recognizer.stop_continuous_recognition()
-            self.is_recognizing = False
+            if self.recognizer is not None:
+                self.recognizer.stop_continuous_recognition()
+                self.is_recognizing = False
+            else:
+                logger.error("识别器未初始化")
         except Exception as e:
             logger.error(f"连续识别停止错误: {e}")
 
             # 通知主线程有错误
             if self.loop:
 
-                async def send_status():
+                async def send_status() -> None:
                     await self.send_error(f"连续识别停止错误: {str(e)}")
 
                 asyncio.run_coroutine_threadsafe(send_status(), self.loop)
