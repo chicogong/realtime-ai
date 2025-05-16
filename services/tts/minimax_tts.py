@@ -34,7 +34,7 @@ class MiniMaxTTSService(BaseTTSService):
         self.volume = 1  # 音量，整数值
         self.pitch = 0  # 音调，整数值
         self.emotion = ""  # 情感，默认为空
-        self.model = "speech-02-hd"  # 模型名称
+        self.model = "speech-01-hd"  # 模型名称
         self.group_id = ""  # 组ID，可能为空
         
         self.is_processing = False
