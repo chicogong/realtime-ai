@@ -255,6 +255,8 @@ class WebSocketHandler:
             logger.error("无法获取会话，关闭连接")
             await websocket.close()
             return
+        else:
+            logger.info(f"获取会话 {session.session_id} 成功")
             
         session_id = session.session_id
         logger.info(f"新WebSocket连接已建立，会话ID: {session_id}")
@@ -296,7 +298,7 @@ class WebSocketHandler:
         session = get_session(session_id)
         if session:
             logger.info(f"设置ASR服务，会话ID: {session_id}")
-            session.asr_recognizer = cast(BaseASRService, asr_service)  # 使用 cast 来确保类型安全
+            session.asr_recognizer = asr_service  # 移除冗余的 cast
             asr_service.set_websocket(websocket, loop, session_id)
             asr_service.setup_handlers()
         return asr_service
@@ -367,7 +369,7 @@ class WebSocketHandler:
         if new_asr_service:
             session = get_session(session_id)
             if session:
-                session.asr_recognizer = cast(BaseASRService, new_asr_service)
+                session.asr_recognizer = new_asr_service  # 移除冗余的 cast
                 new_asr_service.set_websocket(websocket, asyncio.get_running_loop(), session_id)
                 new_asr_service.setup_handlers()
                 await new_asr_service.start_recognition()
