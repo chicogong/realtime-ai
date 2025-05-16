@@ -114,7 +114,7 @@ class AzureTTSService(BaseTTSService):
                     return
                     
                 session = get_session(self.session_id)
-                if session.is_interrupted():
+                if session and session.is_interrupted():
                     logger.info(f"会话已中断，跳过添加音频到队列")
                     return
 
@@ -158,7 +158,7 @@ class AzureTTSService(BaseTTSService):
                     continue
                     
                 session = get_session(self.session_id)
-                if session.is_interrupted():
+                if session and session.is_interrupted():
                     logger.info(f"会话已中断，跳过音频发送: {text[:30]}...")
                     self.send_queue.task_done()
                     continue

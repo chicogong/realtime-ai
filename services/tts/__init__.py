@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from loguru import logger
 
@@ -18,7 +18,7 @@ def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSServ
         TTS服务实例，如果创建失败则返回None
     """
     try:
-        tts_service = None
+        tts_service: Optional[BaseTTSService] = None
 
         if Config.TTS_PROVIDER == "azure":
             logger.info("创建Azure TTS服务")

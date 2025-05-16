@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI, WebSocket
@@ -25,7 +26,7 @@ logger.add(
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup code
     cleanup_task = asyncio.create_task(cleanup_inactive_sessions())
     logger.info("Application started, listening for WebSocket connections")

@@ -4,6 +4,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import async_timeout
 from loguru import logger
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from openai.types.chat.completion_create_params import CompletionCreateParamsStreaming
+from openai._streaming import AsyncStream
 
 from config import Config
 from services.llm.base import BaseLLMService
@@ -25,7 +29,7 @@ class OpenAIService(BaseLLMService):
         self.model = model
         self.base_url = base_url
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url if base_url else None)
-        self.active_generation = None
+        self.active_generation: Optional[AsyncStream[ChatCompletionChunk]] = None
         self.stop_requested = False
 
         logger.info(f"OpenAI服务初始化: 模型={model}" + (f", API={base_url}" if base_url else ""))

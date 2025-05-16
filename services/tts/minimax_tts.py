@@ -139,10 +139,10 @@ class MiniMaxTTSService(BaseTTSService):
 
                             if self.session_id is None:
                                 logger.error("session_id is None")
-                                break
+                                return
                                 
                             session = get_session(self.session_id)
-                            if session.is_interrupted():
+                            if session and session.is_interrupted():
                                 logger.info(f"会话已中断，停止TTS流")
                                 break
 
@@ -220,7 +220,10 @@ class MiniMaxTTSService(BaseTTSService):
                                         logger.error(f"处理音频数据异常: {str(e)}")
 
                             # 保留最后一行，可能不完整
-                            buffer = lines[-1]
+                            if lines[-1]:
+                                buffer = bytearray(lines[-1])
+                            else:
+                                buffer = bytearray()
 
                     # 处理完成，将完整音频数据加入发送队列
                     if all_audio_data:
@@ -266,7 +269,7 @@ class MiniMaxTTSService(BaseTTSService):
                 # 检查会话是否已中断
                 from models.session import get_session
 
-                session = get_session(self.session_id)
+                session = get_session(self.session_id or "")
                 if session.is_interrupted():
                     logger.info(f"会话已中断，跳过音频发送: {text[:30]}...")
                     self.send_queue.task_done()

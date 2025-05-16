@@ -298,7 +298,7 @@ class WebSocketHandler:
         session = get_session(session_id)
         if session:
             logger.info(f"设置ASR服务，会话ID: {session_id}")
-            session.asr_recognizer = asr_service  # 移除冗余的 cast
+            session.asr_recognizer = asr_service
             asr_service.set_websocket(websocket, loop, session_id)
             asr_service.setup_handlers()
         return asr_service
@@ -327,7 +327,9 @@ class WebSocketHandler:
             if session and has_voice and (session.is_tts_active or session.is_processing_llm):
                 if self.audio_processor.voice_detector.has_continuous_voice():
                     logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
-                    await self._stop_tts_and_clear_queues(websocket, session_id)
+                    current_websocket = asr_service.websocket
+                    if current_websocket:
+                        await self._stop_tts_and_clear_queues(current_websocket, session_id)
                     self.audio_processor.voice_detector.reset()
 
             asr_service.feed_audio(pcm_data)
@@ -369,11 +371,10 @@ class WebSocketHandler:
         if new_asr_service:
             session = get_session(session_id)
             if session:
-                session.asr_recognizer = new_asr_service  # 移除冗余的 cast
+                session.asr_recognizer = new_asr_service
                 new_asr_service.set_websocket(websocket, asyncio.get_running_loop(), session_id)
                 new_asr_service.setup_handlers()
                 await new_asr_service.start_recognition()
-                asr_service = new_asr_service
         else:
             await websocket.send_json({"type": "error", "message": "无法创建新的ASR服务", "session_id": session_id})
 
@@ -413,11 +414,11 @@ class WebSocketHandler:
                 await session.tts_processor.close()
             except Exception as e:
                 logger.error(f"关闭TTS服务错误: {e}")
-        else:
-            logger.error(f"无法获取会话 {session_id}，无法关闭TTS")
-
+                
+        # 移除会话
         remove_session(session_id)
 
+        # 关闭WebSocket连接
         try:
             await websocket.close()
         except Exception as e:
