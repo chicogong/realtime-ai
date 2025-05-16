@@ -1,0 +1,130 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "realtime-ai"
+version = "0.1.0"
+description = "Real-time AI processing service"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn>=0.25.0",
+    "python-dotenv>=1.0.0",
+    "azure-cognitiveservices-speech>=1.31.0",
+    "httpx>=0.25.2",
+    "openai>=1.11.0",
+    "async-timeout>=4.0.3",
+    "websockets>=11.0.3",
+    "loguru>=0.7.3",
+    "pydantic>=1.8.2",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["services"]
+
+[tool.uv]
+resolution = "lowest-direct"
+default-groups = ["dev", "lint", "test"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=3.5.0",
+]
+lint = [
+    "pylint>=2.9.6",
+    "mypy>=0.910",
+    "flake8>=3.9.2",
+    "black>=21.7b0",
+    "isort>=5.9.3",
+]
+test = [
+    "pytest>=6.2.5",
+    "pytest-asyncio>=0.15.1",
+    "pytest-cov>=2.12.1",
+]
+
+[tool.black]
+line-length = 120
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 120
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=services --cov-report=term-missing"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+ignore_missing_imports = true
+allow_redefinition = true
+allow_untyped_defs = true
+allow_untyped_globals = true
+
+[tool.pylint.messages_control]
+disable = [
+    "C0111",  # missing-docstring
+    "C0103",  # invalid-name
+    "C0303",  # trailing-whitespace
+    "W0311",  # bad-indentation
+    "W0603",  # global-statement
+    "W0621",  # redefined-outer-name
+    "R0903",  # too-few-public-methods
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-locals
+    "R0915",  # too-many-statements
+]
+
+[tool.pylint.format]
+max-line-length = 120
+good-names = ["i", "j", "k", "ex", "Run", "_", "id", "fd"]
+
+[tool.pylint.design]
+max-args = 10
+max-attributes = 15
+max-public-methods = 20
+max-instance-attributes = 15
+max-locals = 25
+max-statements = 50
+max-branches = 15
+max-returns = 6
+max-bool-expr = 5
+
+[tool.pylint.basic]
+ignore = ["CVS", ".git", "__pycache__", "build", "dist"]
+
+[tool.flake8]
+max-line-length = 120
+ignore = ["E203", "W503", "E501", "F401", "F403", "F405"]
+exclude = [".git", "__pycache__", "build", "dist"]
+max-complexity = 10
+statistics = true
+show-source = true
+show-error-codes = true
+format = "{path}:{row}:{col}: {code} {text}"
+allow-unused-variables = true
+allow-unused-imports = true
+allow-unused-arguments = true
+allow-unused-locals = true
+allow-unused-globals = true 
