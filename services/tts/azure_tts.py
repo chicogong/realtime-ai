@@ -109,6 +109,10 @@ class AzureTTSService(BaseTTSService):
                 # 检查会话是否已中断
                 from models.session import get_session
 
+                if self.session_id is None:
+                    logger.error("session_id is None")
+                    return
+                    
                 session = get_session(self.session_id)
                 if session.is_interrupted():
                     logger.info(f"会话已中断，跳过添加音频到队列")
@@ -148,6 +152,11 @@ class AzureTTSService(BaseTTSService):
                 # 检查会话是否已中断
                 from models.session import get_session
 
+                if self.session_id is None:
+                    logger.error("session_id is None")
+                    self.send_queue.task_done()
+                    continue
+                    
                 session = get_session(self.session_id)
                 if session.is_interrupted():
                     logger.info(f"会话已中断，跳过音频发送: {text[:30]}...")

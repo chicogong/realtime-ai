@@ -22,6 +22,9 @@ def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSServ
 
         if Config.TTS_PROVIDER == "azure":
             logger.info("创建Azure TTS服务")
+            if Config.AZURE_SPEECH_KEY is None or Config.AZURE_SPEECH_REGION is None:
+                logger.error("Azure TTS配置缺失")
+                return None
             tts_service = AzureTTSService(
                 subscription_key=Config.AZURE_SPEECH_KEY,
                 region=Config.AZURE_SPEECH_REGION,
@@ -29,6 +32,9 @@ def create_tts_service(session_id: Optional[str] = None) -> Optional[BaseTTSServ
             )
         elif Config.TTS_PROVIDER == "minimax":
             logger.info("创建MiniMax TTS服务")
+            if Config.MINIMAX_API_KEY is None:
+                logger.error("MiniMax TTS配置缺失")
+                return None
             tts_service = MiniMaxTTSService(api_key=Config.MINIMAX_API_KEY, voice_id=Config.MINIMAX_VOICE_ID)
         # 未来可以在这里添加其他TTS提供商的支持
         # elif Config.TTS_PROVIDER == "other_provider":

@@ -58,10 +58,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def get_root() -> str:
+async def get_root() -> HTMLResponse:
     """Return the main page HTML"""
     with open("static/index.html", "r", encoding="utf-8") as f:
-        return f.read()
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/health")

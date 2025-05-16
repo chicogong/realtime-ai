@@ -16,6 +16,9 @@ def create_llm_service() -> Optional[BaseLLMService]:
     try:
         if Config.LLM_PROVIDER == "openai":
             logger.info("创建OpenAI LLM服务")
+            if Config.OPENAI_API_KEY is None:
+                logger.error("OpenAI API密钥缺失")
+                return None
             return OpenAIService(
                 api_key=Config.OPENAI_API_KEY, model=Config.OPENAI_MODEL, base_url=Config.OPENAI_BASE_URL
             )

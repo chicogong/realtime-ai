@@ -87,7 +87,7 @@ class MiniMaxTTSService(BaseTTSService):
             client = await MiniMaxTTSService.get_http_client()
 
             # 构建请求
-            url = "https://api.minimax.chat/v1/t2a_v2"
+            url = "http://api.minimax.chat/v1/t2a_v2"
             if self.group_id:
                 url = f"{url}?GroupId={self.group_id}"
 
@@ -137,6 +137,10 @@ class MiniMaxTTSService(BaseTTSService):
                             # 检查会话是否已中断
                             from models.session import get_session
 
+                            if self.session_id is None:
+                                logger.error("session_id is None")
+                                break
+                                
                             session = get_session(self.session_id)
                             if session.is_interrupted():
                                 logger.info(f"会话已中断，停止TTS流")
@@ -187,7 +191,7 @@ class MiniMaxTTSService(BaseTTSService):
                                             status_msg = base_resp.get("status_msg")
                                             if status_code != 0:
                                                 logger.error(
-                                                    f"MiniMax TTS错误: status_code={status_code}, status_msg={status_msg}, trace_id={trace_id}, requestid={request_id}"
+                                                    f"MiniMax TTS错误: status_code={status_code}, status_msg={status_msg}"
                                                 )
                                                 continue
 

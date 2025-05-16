@@ -16,6 +16,9 @@ def create_asr_service() -> Optional[BaseASRService]:
     try:
         if Config.ASR_PROVIDER == "azure":
             logger.info("创建Azure ASR服务")
+            if Config.AZURE_SPEECH_KEY is None or Config.AZURE_SPEECH_REGION is None:
+                logger.error("Azure ASR配置缺失")
+                return None
             return AzureASRService(
                 subscription_key=Config.AZURE_SPEECH_KEY,
                 region=Config.AZURE_SPEECH_REGION,
