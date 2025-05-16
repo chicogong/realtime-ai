@@ -65,6 +65,12 @@ class LLMProcessor:
 
         try:
             logger.info(f"LLM处理文本: '{text}' [sid:{session_id}]")
+            
+            # 检查WebSocket连接状态
+            if websocket.client_state.value == 3:  # 3 表示连接已关闭
+                logger.info("WebSocket连接已关闭，停止LLM处理")
+                return
+                
             await websocket.send_json({"type": "llm_status", "status": "processing", "session_id": session_id})
 
             tts_processor = await LLMProcessor._setup_services(websocket, session_id)
@@ -81,7 +87,12 @@ class LLMProcessor:
 
         except Exception as e:
             logger.error(f"LLM处理错误: {e}")
-            await websocket.send_json({"type": "error", "message": f"LLM错误: {str(e)}", "session_id": session_id})
+            # 只有在连接未关闭时才发送错误消息
+            if websocket.client_state.value != 3:
+                try:
+                    await websocket.send_json({"type": "error", "message": f"LLM错误: {str(e)}", "session_id": session_id})
+                except Exception as send_error:
+                    logger.error(f"发送错误消息失败: {send_error}")
         finally:
             session.is_processing_llm = False
             session.is_tts_active = False
@@ -113,6 +124,11 @@ class LLMProcessor:
                     logger.info(f"检测到中断请求，停止LLM流 [sid:{session_id}]")
                     break
 
+                # 检查WebSocket连接状态
+                if websocket.client_state.value == 3:  # 3 表示连接已关闭
+                    logger.info("WebSocket连接已关闭，停止LLM流处理")
+                    break
+
                 collected_response += chunk
                 text_buffer += chunk
 
@@ -140,14 +156,20 @@ class LLMProcessor:
                             text_buffer = text_buffer[text_buffer.rfind(last_sentence) + len(last_sentence) :]
 
                 if not session.is_interrupted():
-                    await websocket.send_json(
-                        {
-                            "type": "llm_response",
-                            "content": collected_response,
-                            "is_complete": False,
-                            "session_id": session_id,
-                        }
-                    )
+                    try:
+                        await websocket.send_json(
+                            {
+                                "type": "llm_response",
+                                "content": collected_response,
+                                "is_complete": False,
+                                "session_id": session_id,
+                            }
+                        )
+                    except Exception as e:
+                        if "close message has been sent" in str(e):
+                            logger.info("WebSocket连接已关闭，停止发送LLM响应")
+                            break
+                        raise e
 
             await LLMProcessor._handle_remaining_text(
                 websocket,
@@ -161,7 +183,11 @@ class LLMProcessor:
 
         except asyncio.TimeoutError:
             logger.error("LLM流式处理超时")
-            await websocket.send_json({"type": "error", "message": "LLM流式处理超时", "session_id": session_id})
+            if websocket.client_state.value != 3:
+                try:
+                    await websocket.send_json({"type": "error", "message": "LLM流式处理超时", "session_id": session_id})
+                except Exception as send_error:
+                    logger.error(f"发送超时错误消息失败: {send_error}")
 
     @staticmethod
     async def _handle_remaining_text(

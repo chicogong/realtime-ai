@@ -272,6 +272,11 @@ class MiniMaxTTSService(BaseTTSService):
                 session.is_tts_active = True
 
                 try:
+                    # 检查WebSocket连接状态
+                    if websocket.client_state.value == 3:  # 3 表示连接已关闭
+                        logger.info("WebSocket连接已关闭，停止发送音频数据")
+                        break
+
                     # 发送音频信息
                     await websocket.send_json(
                         {
@@ -296,6 +301,10 @@ class MiniMaxTTSService(BaseTTSService):
                     logger.info(f"音频数据已发送, 大小: {len(audio_data)} 字节")
                 except Exception as e:
                     logger.error(f"发送音频数据错误: {e}")
+                    # 如果是连接关闭错误，直接退出循环
+                    if "close message has been sent" in str(e):
+                        logger.info("检测到WebSocket连接已关闭，停止发送音频数据")
+                        break
                 finally:
                     # 标记TTS已完成
                     session.is_tts_active = False
