@@ -18,7 +18,7 @@ class MiniMaxTTSService(BaseTTSService):
     """MiniMax TTS服务实现"""
 
     # 全局资源
-    _http_client = None  # 共享HTTP客户端
+    _http_client: Optional[httpx.AsyncClient] = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
     def __init__(self, api_key: str, voice_id: str = "male-qn-qingse") -> None:
@@ -55,7 +55,7 @@ class MiniMaxTTSService(BaseTTSService):
         Returns:
             HTTP客户端实例
         """
-        if cls._http_client is None or cls._http_client.is_closed:
+        if cls._http_client is None or (cls._http_client is not None and cls._http_client.is_closed):
             # 设置超时参数
             timeout = httpx.Timeout(30.0, connect=10.0)
             cls._http_client = httpx.AsyncClient(timeout=timeout)
@@ -97,7 +97,7 @@ class MiniMaxTTSService(BaseTTSService):
                 "Accept": "application/json, text/plain, */*",
             }
 
-            payload = {
+            payload: Dict[str, Any] = {
                 "model": self.model,
                 "text": text,
                 "stream": True,

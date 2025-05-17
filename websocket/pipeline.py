@@ -1,6 +1,7 @@
 import asyncio
-from typing import Optional
+from typing import Optional, Any
 from loguru import logger
+from fastapi import WebSocket
 
 from session import SessionState
 from services.llm import create_llm_service
@@ -11,7 +12,7 @@ from utils.text import split_into_sentences
 class PipelineHandler:
     """Handles the processing pipeline for ASR -> LLM -> TTS"""
 
-    def __init__(self, session: SessionState, websocket) -> None:
+    def __init__(self, session: SessionState, websocket: WebSocket) -> None:
         self.session = session
         self.websocket = websocket
         self.llm_service = create_llm_service()

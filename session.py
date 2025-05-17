@@ -1,7 +1,7 @@
 import time
 import uuid
 import asyncio
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 
 from loguru import logger
 
@@ -13,16 +13,16 @@ class SessionState:
         self.session_id = session_id or str(uuid.uuid4())
         self.is_processing_llm = False
         self.is_tts_active = False
-        self.response_stream = None
+        self.response_stream: Any = None
         self.interrupt_requested = False
-        self.tts_processor = None
+        self.tts_processor: Any = None
         self.last_activity = time.time()
-        self.asr_recognizer = None
+        self.asr_recognizer: Any = None
         
         # Pipeline components
-        self.asr_queue = asyncio.Queue()  # Queue for ASR results
-        self.llm_queue = asyncio.Queue()  # Queue for LLM responses
-        self.tts_queue = asyncio.Queue()  # Queue for TTS tasks
+        self.asr_queue: asyncio.Queue[str] = asyncio.Queue()  # Queue for ASR results
+        self.llm_queue: asyncio.Queue[str] = asyncio.Queue()  # Queue for LLM responses
+        self.tts_queue: asyncio.Queue[str] = asyncio.Queue()  # Queue for TTS tasks
         
         # Pipeline tasks
         self.pipeline_tasks: List[asyncio.Task] = []
