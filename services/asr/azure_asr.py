@@ -6,7 +6,6 @@ import azure.cognitiveservices.speech as speechsdk
 from loguru import logger
 
 from services.asr.base import BaseASRService
-from utils.audio import AudioDiagnostics
 
 
 class AzureASRService(BaseASRService):
@@ -25,7 +24,6 @@ class AzureASRService(BaseASRService):
         self.region = region
         self.push_stream: Optional[speechsdk.audio.PushAudioInputStream] = None
         self.recognizer: Optional[speechsdk.SpeechRecognizer] = None
-        self.audio_diagnostics = AudioDiagnostics()
 
         # 初始化识别器
         self._setup_recognizer()
@@ -192,9 +190,6 @@ class AzureASRService(BaseASRService):
         if not audio_chunk or len(audio_chunk) == 0:
             logger.warning("收到空音频块")
             return
-
-        # 音频诊断
-        self.audio_diagnostics.record_chunk(audio_chunk)
 
         # 送入语音识别器
         if self.push_stream:

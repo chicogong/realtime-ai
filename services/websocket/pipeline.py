@@ -113,6 +113,7 @@ class PipelineHandler:
             collected_response = ""
             text_buffer = ""
             current_sentence = ""
+            sentence_endings = ["。", "！", "？", ".", "!", "?"]
             
             async for chunk in self.llm_service.generate_response(text):
                 if self.session.is_interrupted():
@@ -131,13 +132,19 @@ class PipelineHandler:
                 })
                 
                 # Check for sentence endings
-                if any(end in current_sentence for end in ["。", "！", "？", ".", "!", "?"]):
-                    # Split into sentences
+                if any(end in current_sentence for end in sentence_endings):
                     sentences = split_into_sentences(current_sentence)
                     if sentences:
-                        # Process all complete sentences
-                        for sentence in sentences[:-1]:  # Process all but the last sentence
+                        # Process complete sentences
+                        for i, sentence in enumerate(sentences):
+                            is_last = (i == len(sentences) - 1)
+                            
+                            # Only process the last sentence if it's complete
+                            if is_last and not current_sentence.endswith(tuple(sentence_endings)):
+                                continue
+                                
                             logger.info(f"LLM生成句子: {sentence}")
+                            
                             # Send complete sentence subtitle
                             await self.websocket.send_json({
                                 "type": "subtitle",
@@ -145,25 +152,16 @@ class PipelineHandler:
                                 "is_complete": True,
                                 "session_id": self.session.session_id
                             })
+                            
                             # Send to TTS queue
                             await self.session.tts_queue.put(sentence)
-                        
-                        # Keep the last sentence in buffer if it's not complete
-                        last_sentence = sentences[-1]
-                        if current_sentence.endswith(last_sentence):
-                            logger.info(f"LLM生成句子: {last_sentence}")
-                            # Send complete sentence subtitle
-                            await self.websocket.send_json({
-                                "type": "subtitle",
-                                "content": last_sentence,
-                                "is_complete": True,
-                                "session_id": self.session.session_id
-                            })
-                            # Send to TTS queue
-                            await self.session.tts_queue.put(last_sentence)
+                            
+                        # Reset current sentence if we processed the last one
+                        if current_sentence.endswith(tuple(sentence_endings)):
                             current_sentence = ""
                         else:
-                            current_sentence = current_sentence[current_sentence.rfind(last_sentence) + len(last_sentence):]
+                            # Keep the incomplete sentence
+                            current_sentence = sentences[-1]
 
                 # Send streaming response
                 await self.websocket.send_json({
@@ -178,14 +176,12 @@ class PipelineHandler:
                 sentences = split_into_sentences(current_sentence)
                 for sentence in sentences:
                     logger.info(f"LLM生成句子: {sentence}")
-                    # Send complete sentence subtitle
                     await self.websocket.send_json({
                         "type": "subtitle",
                         "content": sentence,
                         "is_complete": True,
                         "session_id": self.session.session_id
                     })
-                    # Send to TTS queue
                     await self.session.tts_queue.put(sentence)
 
             if not self.session.is_interrupted():

@@ -8,10 +8,8 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from openai import AsyncOpenAI
 
 from config import Config
-from models.session import sessions
 from services.tts import close_all_tts_services
 from services.websocket.handler import cleanup_inactive_sessions, handle_websocket_connection
 
@@ -45,11 +43,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 # Initialize FastAPI app
 app = FastAPI(title="Realtime AI Chat API", lifespan=lifespan)
-
-# Configure OpenAI client
-openai_client = AsyncOpenAI(
-    api_key=Config.OPENAI_API_KEY, base_url=Config.OPENAI_BASE_URL if Config.OPENAI_BASE_URL else None
-)
 
 
 @app.websocket("/ws")
