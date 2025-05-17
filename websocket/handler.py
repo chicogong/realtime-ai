@@ -9,13 +9,13 @@ from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from config import Config
-from models.session import get_all_sessions, get_session, remove_session, SessionState
+from session import get_all_sessions, get_session, remove_session, SessionState
 from services.asr import create_asr_service, BaseASRService
 from services.llm import create_llm_service
 from services.tts import close_all_tts_services, create_tts_service
 from utils.audio import VoiceActivityDetector, parse_audio_header
 from utils.text import split_into_sentences
-from .pipeline import PipelineHandler
+from websocket.pipeline import PipelineHandler
 
 
 class AudioProcessor:

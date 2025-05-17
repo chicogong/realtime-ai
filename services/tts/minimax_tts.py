@@ -135,7 +135,7 @@ class MiniMaxTTSService(BaseTTSService):
                         # 根据参考实现来处理响应内容
                         async for chunk in response.aiter_bytes():
                             # 检查会话是否已中断
-                            from models.session import get_session
+                            from session import get_session
 
                             if self.session_id is None:
                                 logger.error("session_id is None")
@@ -267,7 +267,7 @@ class MiniMaxTTSService(BaseTTSService):
                 text = item["text"]
 
                 # 检查会话是否已中断
-                from models.session import get_session
+                from session import get_session
 
                 session = get_session(self.session_id or "")
                 if session.is_interrupted():

@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional
 from loguru import logger
 
-from models.session import SessionState
+from session import SessionState
 from services.llm import create_llm_service
 from services.tts import create_tts_service
 from utils.text import split_into_sentences

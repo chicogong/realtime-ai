@@ -107,7 +107,7 @@ class AzureTTSService(BaseTTSService):
                 logger.info(f"TTS请求完成，耗时: {time.time() - start_time:.2f}秒，音频大小: {len(audio_data)} 字节")
 
                 # 检查会话是否已中断
-                from models.session import get_session
+                from session import get_session
 
                 if self.session_id is None:
                     logger.error("session_id is None")
@@ -150,7 +150,7 @@ class AzureTTSService(BaseTTSService):
                 text = item["text"]
 
                 # 检查会话是否已中断
-                from models.session import get_session
+                from session import get_session
 
                 if self.session_id is None:
                     logger.error("session_id is None")

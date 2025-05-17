@@ -107,7 +107,7 @@ class AzureASRService(BaseASRService):
 
         # 只处理非空结果
         if text.strip() and self.websocket and self.loop:
-            from services.websocket.handler import process_final_transcript
+            from websocket.handler import process_final_transcript
 
             async def process_and_send_final() -> None:
                 # 发送最终识别结果
@@ -154,7 +154,7 @@ class AzureASRService(BaseASRService):
 
         # 如果有部分结果但没有生成最终结果，则使用部分结果作为最终结果
         if self.websocket and self.loop and self.last_partial_result.strip():
-            from services.websocket.handler import process_final_transcript
+            from websocket.handler import process_final_transcript
 
             async def send_final_from_partial() -> None:
                 logger.info(f"使用最后的部分结果作为最终结果: '{self.last_partial_result}'")

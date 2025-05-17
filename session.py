@@ -19,10 +19,9 @@ class SessionState:
         self.last_activity = time.time()
         self.asr_recognizer = None
         
-        # New pipeline components
+        # Pipeline components
         self.asr_queue = asyncio.Queue()  # Queue for ASR results
         self.llm_queue = asyncio.Queue()  # Queue for LLM responses
-        self.sentence_queue = asyncio.Queue()  # Queue for split sentences
         self.tts_queue = asyncio.Queue()  # Queue for TTS tasks
         
         # Pipeline tasks
@@ -63,29 +62,12 @@ class SessionState:
             self.current_tts_task = None
             
         # Clear all queues
-        while not self.asr_queue.empty():
-            try:
-                self.asr_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-                
-        while not self.llm_queue.empty():
-            try:
-                self.llm_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-                
-        while not self.sentence_queue.empty():
-            try:
-                self.sentence_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-                
-        while not self.tts_queue.empty():
-            try:
-                self.tts_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        for queue in [self.asr_queue, self.llm_queue, self.tts_queue]:
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
 
 # Global session state dictionary
@@ -108,4 +90,4 @@ def remove_session(session_id: str) -> None:
 
 def get_all_sessions() -> Dict[str, SessionState]:
     """Get all active sessions"""
-    return sessions
+    return sessions 
