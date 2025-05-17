@@ -174,7 +174,7 @@ const websocketHandler = {
             case 'tts_stop':
                 console.log('停止TTS音频播放');
                 if (audioProcessor) {
-                    audioProcessor.stopAudio();
+                    audioProcessor.stopAudioPlayback();
                 }
                 break;
             

@@ -14,6 +14,7 @@ from services.llm import create_llm_service
 from services.tts import close_all_tts_services, create_tts_service
 from utils.audio import VoiceActivityDetector, parse_audio_header
 from utils.text import split_into_sentences
+from .pipeline import PipelineHandler
 
 
 class AudioProcessor:
@@ -273,6 +274,10 @@ class WebSocketHandler:
         if not asr_service:
             return
 
+        # Create and start pipeline
+        pipeline = PipelineHandler(session, websocket)
+        await pipeline.start_pipeline()
+
         try:
             await asr_service.start_recognition()
             await self._handle_messages(websocket, asr_service, session_id)
@@ -285,7 +290,7 @@ class WebSocketHandler:
             except:
                 pass
         finally:
-            await self._cleanup(websocket, asr_service, session_id)
+            await self._cleanup(websocket, asr_service, session_id, pipeline)
 
     async def _setup_asr_service(self, websocket: WebSocket, session_id: str, loop: Any) -> Optional[BaseASRService]:
         """设置ASR服务"""
@@ -327,9 +332,7 @@ class WebSocketHandler:
             if session and has_voice and (session.is_tts_active or session.is_processing_llm):
                 if self.audio_processor.voice_detector.has_continuous_voice():
                     logger.info(f"检测到明显的语音输入，打断当前响应，会话ID: {session_id}")
-                    current_websocket = asr_service.websocket
-                    if current_websocket:
-                        await self._stop_tts_and_clear_queues(current_websocket, session_id)
+                    session.request_interrupt()
                     self.audio_processor.voice_detector.reset()
 
             asr_service.feed_audio(pcm_data)
@@ -357,7 +360,9 @@ class WebSocketHandler:
         """处理停止命令"""
         await asr_service.stop_recognition()
         logger.info(f"停止命令接收，停止所有TTS和LLM进程，会话ID: {session_id}")
-        await self._stop_tts_and_clear_queues(websocket, session_id)
+        session = get_session(session_id)
+        if session:
+            session.request_interrupt()
         await websocket.send_json(
             {"type": "stop_acknowledged", "message": "所有处理已停止", "queues_cleared": True, "session_id": session_id}
         )
@@ -384,23 +389,11 @@ class WebSocketHandler:
         session = get_session(session_id)
         if session:
             session.request_interrupt()
-            await self._stop_tts_and_clear_queues(websocket, session_id)
             await websocket.send_json({"type": "interrupt_acknowledged", "session_id": session_id})
         else:
             logger.error(f"无法获取会话 {session_id}，无法处理中断命令")
 
-    async def _stop_tts_and_clear_queues(self, websocket: WebSocket, session_id: str) -> None:
-        """停止TTS响应并清空所有队列"""
-        session = get_session(session_id)
-        if session:
-            session.request_interrupt()
-            if session.tts_processor:
-                await session.tts_processor.interrupt()
-            await websocket.send_json({"type": "tts_stop", "session_id": session_id})
-        else:
-            logger.error(f"无法获取会话 {session_id}，无法停止TTS")
-
-    async def _cleanup(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
+    async def _cleanup(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str, pipeline: PipelineHandler) -> None:
         """清理资源"""
         if asr_service:
             try:
@@ -408,12 +401,8 @@ class WebSocketHandler:
             except Exception as e:
                 logger.error(f"停止ASR服务错误: {e}")
 
-        session = get_session(session_id)
-        if session and session.tts_processor:
-            try:
-                await session.tts_processor.close()
-            except Exception as e:
-                logger.error(f"关闭TTS服务错误: {e}")
+        # Cleanup pipeline
+        await pipeline.cleanup()
                 
         # 移除会话
         remove_session(session_id)
@@ -465,7 +454,9 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
 
 async def process_final_transcript(websocket: WebSocket, text: str, session_id: str) -> None:
     """处理最终转录文本的主入口函数"""
-    await LLMProcessor.process_response(websocket, text, session_id)
+    session = get_session(session_id)
+    if session:
+        await session.asr_queue.put(text)
 
 
 async def cleanup_inactive_sessions() -> None:

@@ -1,6 +1,7 @@
 import time
 import uuid
-from typing import Dict, Optional
+import asyncio
+from typing import Dict, Optional, List
 
 from loguru import logger
 
@@ -17,10 +18,22 @@ class SessionState:
         self.tts_processor = None
         self.last_activity = time.time()
         self.asr_recognizer = None
+        
+        # New pipeline components
+        self.asr_queue = asyncio.Queue()  # Queue for ASR results
+        self.llm_queue = asyncio.Queue()  # Queue for LLM responses
+        self.sentence_queue = asyncio.Queue()  # Queue for split sentences
+        self.tts_queue = asyncio.Queue()  # Queue for TTS tasks
+        
+        # Pipeline tasks
+        self.pipeline_tasks: List[asyncio.Task] = []
+        self.current_llm_task: Optional[asyncio.Task] = None
+        self.current_tts_task: Optional[asyncio.Task] = None
 
     def request_interrupt(self) -> None:
         logger.info(f"Interrupt requested: {self.session_id}")
         self.interrupt_requested = True
+        self._cancel_pipeline_tasks()
 
     def clear_interrupt(self) -> None:
         self.interrupt_requested = False
@@ -33,6 +46,46 @@ class SessionState:
 
     def is_inactive(self, timeout_seconds: int = 300) -> bool:
         return (time.time() - self.last_activity) > timeout_seconds
+        
+    def _cancel_pipeline_tasks(self) -> None:
+        """Cancel all pipeline tasks"""
+        for task in self.pipeline_tasks:
+            if not task.done():
+                task.cancel()
+        self.pipeline_tasks.clear()
+        
+        if self.current_llm_task and not self.current_llm_task.done():
+            self.current_llm_task.cancel()
+            self.current_llm_task = None
+            
+        if self.current_tts_task and not self.current_tts_task.done():
+            self.current_tts_task.cancel()
+            self.current_tts_task = None
+            
+        # Clear all queues
+        while not self.asr_queue.empty():
+            try:
+                self.asr_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+                
+        while not self.llm_queue.empty():
+            try:
+                self.llm_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+                
+        while not self.sentence_queue.empty():
+            try:
+                self.sentence_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+                
+        while not self.tts_queue.empty():
+            try:
+                self.tts_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
 
 # Global session state dictionary
