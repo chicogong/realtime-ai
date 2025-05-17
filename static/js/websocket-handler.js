@@ -180,6 +180,11 @@ const websocketHandler = {
                     audioProcessor.stopAudioPlayback();
                 }
                 break;
+                
+            case 'subtitle':
+                // 处理字幕信息
+                console.log(`收到字幕: ${messageData.content}, 是否完成: ${messageData.is_complete}`);
+                break;
             
             case 'server_interrupt':
             case 'interrupt_acknowledged':
