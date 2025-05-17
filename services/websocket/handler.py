@@ -2,6 +2,7 @@ import asyncio
 import json
 import struct
 import time
+import uuid
 from typing import Any, Dict, Optional, Tuple, List, Union, cast
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -53,193 +54,6 @@ class AudioProcessor:
             return False, audio_data if len(audio_data) > 2 else None
 
 
-class LLMProcessor:
-    """处理LLM相关的功能"""
-
-    @staticmethod
-    async def process_response(websocket: WebSocket, text: str, session_id: str) -> None:
-        """处理LLM响应"""
-        session = get_session(session_id)
-        session.clear_interrupt()
-        session.is_processing_llm = True
-        session.update_activity()
-
-        try:
-            logger.info(f"LLM处理文本: '{text}' [sid:{session_id}]")
-
-            # 检查WebSocket连接状态
-            if websocket.client_state.value == 3:  # 3 表示连接已关闭
-                logger.info("WebSocket连接已关闭，停止LLM处理")
-                return
-
-            await websocket.send_json({"type": "llm_status", "status": "processing", "session_id": session_id})
-
-            tts_processor = await LLMProcessor._setup_services(websocket, session_id)
-            if not tts_processor:
-                return
-
-            session.tts_processor = tts_processor
-            llm_service = create_llm_service()
-            if not llm_service:
-                await websocket.send_json({"type": "error", "message": "无法创建LLM服务", "session_id": session_id})
-                return
-
-            await LLMProcessor._process_llm_stream(websocket, llm_service, text, tts_processor, session_id)
-
-        except Exception as e:
-            logger.error(f"LLM处理错误: {e}")
-            # 只有在连接未关闭时才发送错误消息
-            if websocket.client_state.value != 3:
-                try:
-                    await websocket.send_json(
-                        {"type": "error", "message": f"LLM错误: {str(e)}", "session_id": session_id}
-                    )
-                except Exception as send_error:
-                    logger.error(f"发送错误消息失败: {send_error}")
-        finally:
-            session.is_processing_llm = False
-            session.is_tts_active = False
-            session.response_stream = None
-
-    @staticmethod
-    async def _setup_services(websocket: WebSocket, session_id: str) -> Optional[Any]:
-        """设置TTS服务"""
-        tts_processor = create_tts_service(session_id)
-        if not tts_processor:
-            await websocket.send_json({"type": "error", "message": "无法创建TTS服务", "session_id": session_id})
-            return None
-        return tts_processor
-
-    @staticmethod
-    async def _process_llm_stream(
-        websocket: WebSocket,
-        llm_service: Any,
-        text: str,
-        tts_processor: Any,
-        session_id: str
-    ) -> None:
-        """处理LLM流式响应"""
-        session = get_session(session_id)
-        session.response_stream = llm_service
-
-        collected_response = ""
-        text_buffer = ""
-        sentences_queue = []
-        first_sentence_processed = False
-
-        try:
-            async for chunk in llm_service.generate_response(text):
-                if session.is_interrupted():
-                    logger.info(f"检测到中断请求，停止LLM流 [sid:{session_id}]")
-                    break
-
-                # 检查WebSocket连接状态
-                if websocket.client_state.value == 3:  # 3 表示连接已关闭
-                    logger.info("WebSocket连接已关闭，停止LLM流处理")
-                    break
-
-                collected_response += chunk
-                text_buffer += chunk
-
-                if any(end in text_buffer for end in ["。", "！", "？", ".", "!", "?"]):
-                    new_sentences = split_into_sentences(text_buffer)
-                    if new_sentences:
-                        sentences_queue.extend(new_sentences)
-
-                        if not first_sentence_processed and len(sentences_queue) > 0:
-                            first_sentence = sentences_queue.pop(0)
-                            if not session.is_interrupted():
-                                await tts_processor.synthesize_text(first_sentence, websocket, is_first=True)
-                                first_sentence_processed = True
-
-                        while len(sentences_queue) > 0:
-                            if session.is_interrupted():
-                                break
-                            sentence = sentences_queue.pop(0)
-                            await tts_processor.synthesize_text(sentence, websocket, is_first=False)
-
-                        last_sentence = new_sentences[-1]
-                        if text_buffer.endswith(last_sentence):
-                            text_buffer = ""
-                        else:
-                            text_buffer = text_buffer[text_buffer.rfind(last_sentence) + len(last_sentence) :]
-
-                if not session.is_interrupted():
-                    try:
-                        await websocket.send_json(
-                            {
-                                "type": "llm_response",
-                                "content": collected_response,
-                                "is_complete": False,
-                                "session_id": session_id,
-                            }
-                        )
-                    except Exception as e:
-                        if "close message has been sent" in str(e):
-                            logger.info("WebSocket连接已关闭，停止发送LLM响应")
-                            break
-                        raise e
-
-            await LLMProcessor._handle_remaining_text(
-                websocket,
-                text_buffer,
-                sentences_queue,
-                tts_processor,
-                session_id,
-                first_sentence_processed,
-                collected_response,
-            )
-
-        except asyncio.TimeoutError:
-            logger.error("LLM流式处理超时")
-            if websocket.client_state.value != 3:
-                try:
-                    await websocket.send_json({"type": "error", "message": "LLM流式处理超时", "session_id": session_id})
-                except Exception as send_error:
-                    logger.error(f"发送超时错误消息失败: {send_error}")
-
-    @staticmethod
-    async def _handle_remaining_text(
-        websocket: WebSocket,
-        text_buffer: str,
-        sentences_queue: List[str],
-        tts_processor: Any,
-        session_id: str,
-        first_sentence_processed: bool,
-        collected_response: str,
-    ) -> None:
-        """处理剩余的文本"""
-        session = get_session(session_id)
-
-        if text_buffer and not session.is_interrupted():
-            sentences_queue.append(text_buffer)
-
-        while len(sentences_queue) > 0 and not session.is_interrupted():
-            sentence = sentences_queue.pop(0)
-            await tts_processor.synthesize_text(sentence, websocket, is_first=not first_sentence_processed)
-            first_sentence_processed = True
-
-        if collected_response and not session.is_interrupted():
-            await websocket.send_json(
-                {"type": "llm_response", "content": collected_response, "is_complete": True, "session_id": session_id}
-            )
-            logger.info(f"LLM响应完成: '{collected_response}'")
-        elif session.is_interrupted():
-            logger.info("LLM处理被中断")
-            await websocket.send_json(
-                {
-                    "type": "llm_response",
-                    "content": "对话被中断",
-                    "is_complete": True,
-                    "was_interrupted": True,
-                    "session_id": session_id,
-                }
-            )
-        else:
-            logger.warning("未收集到任何LLM响应")
-            await websocket.send_json({"type": "error", "message": "LLM未生成任何响应", "session_id": session_id})
-
-
 class WebSocketHandler:
     """处理WebSocket连接和消息"""
 
@@ -250,25 +64,14 @@ class WebSocketHandler:
         """处理WebSocket连接"""
         await websocket.accept()
 
-        loop = asyncio.get_running_loop()
-        session = get_session("")  # 使用空字符串代替 None
-        if not session:
-            logger.error("无法获取会话，关闭连接")
-            await websocket.close()
-            return
-        else:
-            logger.info(f"获取会话 {session.session_id} 成功")
-            
-        session_id = session.session_id
+        # 获取或创建新会话
+        session_id = str(uuid.uuid4())
         logger.info(f"新WebSocket连接已建立，会话ID: {session_id}")
-
+        
+        # 获取会话对象
         session = get_session(session_id)
-        if not session:
-            logger.error(f"无法获取会话 {session_id}，关闭连接")
-            await websocket.close()
-            return
-        else:
-            logger.info(f"获取会话 {session_id} 成功")
+        session.update_activity()
+        loop = asyncio.get_running_loop()
 
         asr_service = await self._setup_asr_service(websocket, session_id, loop)
         if not asr_service:

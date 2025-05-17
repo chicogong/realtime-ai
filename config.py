@@ -49,29 +49,32 @@ class Config:
     @classmethod
     def validate(cls) -> bool:
         """Validate required configuration"""
+        valid = True
+        
         # Validate ASR config
         if cls.ASR_PROVIDER == "azure" and (not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION):
             logger.error("Azure Speech credentials missing: AZURE_SPEECH_KEY and AZURE_SPEECH_REGION required")
-            return False
+            valid = False
 
         # Validate LLM config
         if cls.LLM_PROVIDER == "openai" and not cls.OPENAI_API_KEY:
             logger.error("OpenAI API key missing: OPENAI_API_KEY required")
-            return False
+            valid = False
 
         # Validate TTS config
         if cls.TTS_PROVIDER == "azure" and (not cls.AZURE_SPEECH_KEY or not cls.AZURE_SPEECH_REGION):
             logger.error("Azure Speech credentials missing: AZURE_SPEECH_KEY and AZURE_SPEECH_REGION required")
-            return False
+            valid = False
 
         if cls.TTS_PROVIDER == "minimax" and not cls.MINIMAX_API_KEY:
             logger.error("MiniMax API key missing: MINIMAX_API_KEY required")
-            return False
+            valid = False
 
-        logger.info("Configuration validated")
-        return True
+        if valid:
+            logger.info("Configuration validated successfully")
+        
+        return valid
 
 
 # Validate configuration
-if not Config.validate():
-    logger.warning("Configuration validation failed, some features may not work properly")
+Config.validate()
