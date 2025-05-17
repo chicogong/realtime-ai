@@ -16,7 +16,7 @@ let pendingAudioQueue = [];
 
 // 音频处理器对象
 const audioProcessor = {
-    // 导出配置常量
+    // 公开配置常量
     SAMPLE_RATE: TARGET_SAMPLE_RATE,
     CHANNELS: AUDIO_CHANNELS,
     BUFFER_SIZE: PROCESSING_BUFFER_SIZE,
@@ -62,7 +62,10 @@ const audioProcessor = {
         return isPlayingAudio;
     },
 
-    // 播放音频数据
+    /**
+     * 播放音频数据
+     * @param {ArrayBuffer} audioData - 要播放的PCM音频数据
+     */
     async playAudio(audioData) {
         if (!this.initAudioContext() || !audioData || audioData.byteLength === 0) {
             return;
@@ -84,7 +87,7 @@ const audioProcessor = {
             audioSource.buffer = audioBuffer;
             audioSource.connect(audioContext.destination);
             
-            // 保存当前音频源
+            // 保存当前音频源和状态
             currentAudioSource = audioSource;
             isPlayingAudio = true;
             
@@ -92,15 +95,14 @@ const audioProcessor = {
             audioSource.onended = () => {
                 currentAudioSource = null;
                 
-                // 播放队列中的下一个，使用微小延迟避免衔接问题
-                // 只有在isPlayingAudio为true时才继续播放队列中的下一项
+                // 播放队列中的下一个，使用短延迟避免衔接问题
                 if (isPlayingAudio && pendingAudioQueue.length > 0) {
                     setTimeout(() => {
                         if (isPlayingAudio && pendingAudioQueue.length > 0) {
                             const nextBuffer = pendingAudioQueue.shift();
                             this.playAudio(nextBuffer);
                         }
-                    }, 5);  // 5ms延迟，足够短但有助于音频平滑衔接
+                    }, 5);  // 5ms延迟，有助于音频平滑衔接
                 } else {
                     isPlayingAudio = false;
                 }
@@ -112,12 +114,12 @@ const audioProcessor = {
             console.error('播放音频错误:', e);
             isPlayingAudio = false;
             
-            // 处理下一个音频
+            // 处理队列中的下一个音频
             if (pendingAudioQueue.length > 0) {
                 setTimeout(() => {
                     const nextBuffer = pendingAudioQueue.shift();
                     this.playAudio(nextBuffer);
-                }, 50);  // 增加错误恢复延迟
+                }, 50);  // 错误恢复延迟
             }
         }
     },
@@ -129,17 +131,12 @@ const audioProcessor = {
             return null;
         }
         
-        console.log(`开始PCM转换: 数据大小=${pcmData.byteLength}字节`);
-        
         try {
             // 检查是否为有效的PCM数据大小（必须是偶数字节）
             if (pcmData.byteLength % 2 !== 0) {
-                console.warn(`PCM数据大小不正确（非偶数字节）: ${pcmData.byteLength}字节`);
                 // 截断为偶数字节
                 pcmData = pcmData.slice(0, pcmData.byteLength - 1);
-                console.log(`调整后PCM数据大小: ${pcmData.byteLength}字节`);
                 if (pcmData.byteLength === 0) {
-                    console.error('调整后PCM数据为空');
                     return null;
                 }
             }
@@ -149,8 +146,6 @@ const audioProcessor = {
             const targetSampleRate = TARGET_SAMPLE_RATE; // 16000Hz
             const needsResampling = deviceSampleRate !== targetSampleRate;
             
-            console.log(`PCM转换: 原始采样率=${targetSampleRate}Hz, 目标采样率=${deviceSampleRate}Hz, 数据大小=${pcmData.byteLength}字节, 需要重采样=${needsResampling}, 样本数=${pcmData.byteLength/2}`);
-            
             // 创建临时AudioBuffer
             const sampleCount = pcmData.byteLength / 2;  // 16位PCM，每样本2字节
             const tempBuffer = audioContext.createBuffer(
@@ -159,39 +154,30 @@ const audioProcessor = {
                 targetSampleRate    // 源采样率
             );
             
-            // 获取通道数据
+            // 获取通道数据并将PCM转换为Float32Array
             const channelData = tempBuffer.getChannelData(0);
-            
-            // 将PCM数据转换为Float32Array
             const dataView = new DataView(pcmData);
-            let maxAmplitude = 0;
-            let minAmplitude = 0;
             
             for (let i = 0; i < sampleCount; i++) {
                 try {
                     // 使用小端序，因为服务器使用小端序（true）
                     const int16Value = dataView.getInt16(i * 2, true);
                     // 标准化到 -1.0 到 1.0 范围
-                    const normalizedValue = int16Value / 32768.0;
-                    channelData[i] = normalizedValue;
-                    
-                    // 跟踪音频电平
-                    maxAmplitude = Math.max(maxAmplitude, normalizedValue);
-                    minAmplitude = Math.min(minAmplitude, normalizedValue);
+                    channelData[i] = int16Value / 32768.0;
                 } catch (e) {
-                    console.error(`PCM数据处理错误，索引: ${i}, 总长度: ${pcmData.byteLength}`, e);
+                    console.error(`PCM数据处理错误，索引: ${i}`, e);
                     break;
                 }
             }
             
-            console.log(`PCM数据解析完成: 最大振幅=${maxAmplitude.toFixed(4)}, 最小振幅=${minAmplitude.toFixed(4)}`);
-            
             // 如果需要重采样
             if (needsResampling) {
-                console.log(`执行PCM重采样: ${targetSampleRate}Hz -> ${deviceSampleRate}Hz, 样本数: ${sampleCount} -> 约${Math.round(sampleCount * deviceSampleRate / targetSampleRate)}`);
-                
                 // 创建OfflineAudioContext做重采样
-                const offlineContext = new OfflineAudioContext(1, Math.ceil(channelData.length * deviceSampleRate / targetSampleRate), deviceSampleRate);
+                const offlineContext = new OfflineAudioContext(
+                    1, 
+                    Math.ceil(channelData.length * deviceSampleRate / targetSampleRate), 
+                    deviceSampleRate
+                );
                 
                 // 创建BufferSource
                 const bufferSource = offlineContext.createBufferSource();
@@ -201,10 +187,7 @@ const audioProcessor = {
                 
                 // 执行重采样
                 try {
-                    console.time('重采样耗时');
                     const resampledBuffer = await offlineContext.startRendering();
-                    console.timeEnd('重采样耗时');
-                    console.log(`重采样完成: 新样本数=${resampledBuffer.length}, 持续时间=${resampledBuffer.duration.toFixed(2)}秒`);
                     return resampledBuffer;
                 } catch (e) {
                     console.error('重采样失败, 使用原始缓冲区', e);
@@ -212,7 +195,6 @@ const audioProcessor = {
                 }
             }
             
-            console.log(`PCM转换完成: 样本数=${tempBuffer.length}, 持续时间=${tempBuffer.duration.toFixed(2)}秒`);
             return tempBuffer;
         } catch (e) {
             console.error('PCM转换失败:', e);

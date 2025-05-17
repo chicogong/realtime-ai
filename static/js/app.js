@@ -7,7 +7,7 @@ import websocketHandler from './websocket-handler.js';
 
 // 状态变量
 let activeMediaStream = null;
-let audioProcessor_node = null;
+let audioProcessorNode = null;
 let isSessionActive = false;
 let deviceSampleRate = 0;
 let needsResampling = false;
@@ -23,6 +23,8 @@ const statusIndicatorText = document.getElementById('status-text');
 
 /**
  * 更新状态指示器
+ * @param {string} state - 状态类名
+ * @param {string} message - 状态消息
  */
 function updateStatus(state, message) {
     statusIndicatorDot.className = state;
@@ -34,6 +36,7 @@ function updateStatus(state, message) {
  */
 async function startConversation() {
     try {
+        // 获取麦克风访问权限
         activeMediaStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 echoCancellation: true,
@@ -42,30 +45,35 @@ async function startConversation() {
             } 
         });
         
+        // 初始化音频上下文
         if (!audioProcessor.initAudioContext()) {
             throw new Error('无法初始化音频上下文');
         }
         
+        // 设置音频处理
         const audioContext = getAudioContext();
         deviceSampleRate = audioContext.sampleRate;
         needsResampling = deviceSampleRate !== audioProcessor.SAMPLE_RATE;
         
         const audioSource = audioContext.createMediaStreamSource(activeMediaStream);
-        audioProcessor_node = audioContext.createScriptProcessor(
+        audioProcessorNode = audioContext.createScriptProcessor(
             audioProcessor.BUFFER_SIZE, 
             audioProcessor.CHANNELS, 
             audioProcessor.CHANNELS
         );
         
-        audioProcessor_node.onaudioprocess = processUserSpeech;
-        audioSource.connect(audioProcessor_node);
-        audioProcessor_node.connect(audioContext.destination);
+        // 设置音频处理回调
+        audioProcessorNode.onaudioprocess = processUserSpeech;
+        audioSource.connect(audioProcessorNode);
+        audioProcessorNode.connect(audioContext.destination);
         
+        // 更新状态
         isSessionActive = true;
         updateStatus('listening', '正在听取...');
         startButton.disabled = true;
         stopButton.disabled = false;
         
+        // 通知服务器开始会话
         websocketHandler.sendCommand('start');
     } catch (error) {
         console.error('麦克风访问错误:', error);
@@ -75,14 +83,20 @@ async function startConversation() {
 
 /**
  * 处理用户语音输入
+ * @param {AudioProcessingEvent} event - 音频处理事件
  */
 function processUserSpeech(event) {
+    // 检查会话和连接状态
     if (!isSessionActive || !websocketHandler.getSocket() || 
         websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
     
+    // 获取麦克风数据
     const microphoneData = event.inputBuffer.getChannelData(0);
+    
+    // 检查是否需要中断AI响应
     websocketHandler.checkVoiceInterruption(microphoneData);
     
+    // 处理采样率转换
     let audioToProcess = microphoneData;
     if (needsResampling) {
         audioToProcess = audioProcessor.downsampleBuffer(
@@ -90,9 +104,10 @@ function processUserSpeech(event) {
         );
     }
     
+    // 转换为PCM格式
     const pcmAudioData = audioProcessor.convertFloat32ToInt16(audioToProcess);
     
-    // 使用WebSocketHandler发送音频数据
+    // 发送音频数据
     websocketHandler.sendAudioData(pcmAudioData, isInitialAudioBlock);
     
     // 重置首块标志
@@ -107,29 +122,34 @@ function processUserSpeech(event) {
 function endConversation() {
     if (!isSessionActive) return;
     
+    // 重置状态
     isSessionActive = false;
     isInitialAudioBlock = true;
     
-    // 先停止所有音频播放
+    // 停止音频播放
     audioProcessor.stopAudioPlayback();
     
+    // 关闭麦克风
     if (activeMediaStream) {
         activeMediaStream.getTracks().forEach(track => track.stop());
     }
     
-    if (audioProcessor_node) {
-        audioProcessor_node.disconnect();
-        audioProcessor_node = null;
+    // 断开音频处理节点
+    if (audioProcessorNode) {
+        audioProcessorNode.disconnect();
+        audioProcessorNode = null;
     }
     
+    // 暂停音频上下文
     const audioContext = getAudioContext();
     if (audioContext && audioContext.state === "running" && !isAudioPlaying()) {
         audioContext.suspend().catch(console.error);
     }
     
-    // 向后台发送停止信令
+    // 通知服务器停止会话
     websocketHandler.sendStopAndClearQueues();
     
+    // 更新UI状态
     startButton.disabled = false;
     stopButton.disabled = true;
     updateStatus('idle', '已停止');
@@ -139,19 +159,28 @@ function endConversation() {
  * 重置对话
  */
 function resetConversation() {
+    // 如果会话活跃，先结束会话
     if (isSessionActive) {
         endConversation();
     }
     
+    // 停止所有音频播放
     audioProcessor.stopAudioPlayback();
+    
+    // 清空消息容器
     messagesContainer.innerHTML = '';
+    
+    // 重置状态
     isInitialAudioBlock = true;
+    
+    // 通知服务器重置
     websocketHandler.sendCommand('reset');
     updateStatus('idle', '已重置');
 }
 
 /**
  * 获取音频上下文
+ * @returns {AudioContext|null}
  */
 function getAudioContext() {
     return audioProcessor ? audioProcessor.getAudioContext() : null;
@@ -159,6 +188,7 @@ function getAudioContext() {
 
 /**
  * 检查是否正在播放音频
+ * @returns {boolean}
  */
 function isAudioPlaying() {
     return audioProcessor ? audioProcessor.isPlaying() : false;
@@ -168,12 +198,15 @@ function isAudioPlaying() {
  * 初始化应用
  */
 function init() {
+    // 初始化WebSocket连接
     websocketHandler.initializeWebSocket(updateStatus, startButton);
     
+    // 绑定按钮事件
     startButton.addEventListener('click', startConversation);
     stopButton.addEventListener('click', endConversation);
     resetButton.addEventListener('click', resetConversation);
     
+    // 添加点击事件以恢复音频上下文
     document.addEventListener('click', () => {
         const audioContext = getAudioContext();
         if (audioContext && audioContext.state === 'suspended') {

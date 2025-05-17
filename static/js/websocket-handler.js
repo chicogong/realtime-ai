@@ -1,5 +1,6 @@
 /**
  * WebSocket处理模块
+ * 管理与服务器的WebSocket通信
  */
 
 import audioProcessor from './audio-processor.js';
@@ -8,22 +9,32 @@ const websocketHandler = {
     socket: null,
     isAIResponding: false,
 
-    // 获取当前WebSocket连接
+    /**
+     * 获取当前WebSocket连接
+     * @returns {WebSocket|null} 当前WebSocket连接
+     */
     getSocket() {
         return this.socket;
     },
 
-    // 初始化WebSocket连接
+    /**
+     * 初始化WebSocket连接
+     * @param {Function} updateStatus - 状态更新函数
+     * @param {HTMLButtonElement} startButton - 开始按钮元素
+     */
     initializeWebSocket(updateStatus, startButton) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
+        // 关闭现有连接
         if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
             this.socket.close();
         }
         
+        // 创建新连接
         this.socket = new WebSocket(wsUrl);
         
+        // 连接成功处理
         this.socket.onopen = () => {
             console.log('WebSocket连接成功');
             updateStatus('idle', '已连接，准备就绪');
@@ -31,34 +42,41 @@ const websocketHandler = {
             audioProcessor.initAudioContext();
         };
         
+        // 消息处理
         this.socket.onmessage = (event) => this._handleSocketMessage(event, updateStatus);
         
+        // 连接关闭处理
         this.socket.onclose = () => {
             console.log('WebSocket连接关闭');
             updateStatus('error', '连接已断开');
             startButton.disabled = true;
             
+            // 5秒后尝试重连
             setTimeout(() => {
                 console.log('尝试重新连接...');
                 this.initializeWebSocket(updateStatus, startButton);
             }, 5000);
         };
         
+        // 错误处理
         this.socket.onerror = (error) => {
             console.error('WebSocket错误:', error);
             updateStatus('error', '连接错误');
         };
     },
 
-    // 处理所有WebSocket消息
+    /**
+     * 处理所有WebSocket消息
+     * @private
+     * @param {MessageEvent} event - WebSocket消息事件
+     * @param {Function} updateStatus - 状态更新函数
+     */
     _handleSocketMessage(event, updateStatus) {
         try {
             if (typeof event.data === 'string') {
                 const messageData = JSON.parse(event.data);
-                console.log('收到WebSocket消息:', messageData.type, messageData);
                 this.handleMessage(messageData, updateStatus);
             } else if (event.data instanceof Blob) {
-                console.log('收到二进制数据:', event.data.size, '字节');
                 this.handleReceivedAudioData(event.data);
             }
         } catch (e) {
@@ -66,7 +84,10 @@ const websocketHandler = {
         }
     },
 
-    // 处理接收到的音频数据
+    /**
+     * 处理接收到的音频数据
+     * @param {Blob} audioBlob - 接收到的音频数据Blob
+     */
     async handleReceivedAudioData(audioBlob) {
         try {
             const arrayBuffer = await audioBlob.arrayBuffer();
@@ -77,53 +98,35 @@ const websocketHandler = {
                 return;
             }
             
-            console.log('处理接收的音频数据，总大小:', arrayBuffer.byteLength, '字节');
-            
             // 检查是否有头部信息
             if (arrayBuffer.byteLength >= 12) {
                 // 带头部的格式: [4字节请求ID][4字节块序号][4字节时间戳][PCM数据]
                 const headerView = new DataView(arrayBuffer, 0, 12);
-                const requestId = headerView.getUint32(0, true); // 小端序
-                const chunkNumber = headerView.getUint32(4, true);
-                const timestamp = headerView.getUint32(8, true);
-                
-                // 仅显示首个块的日志
-                if (chunkNumber === 1) {
-                    console.log(`收到音频块: 请求ID=${requestId}, 块=${chunkNumber}, 时间戳=${timestamp}, 数据大小=${arrayBuffer.byteLength - 12}字节`);
-                }
                 
                 // 提取PCM音频数据，从12字节开始
                 let audioData = arrayBuffer.slice(12);
                 
                 // 确保音频数据的大小是偶数字节（16位PCM需要）
                 if (audioData.byteLength % 2 !== 0) {
-                    console.warn('音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
                     audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
-                    console.log('调整后音频数据大小:', audioData.byteLength, '字节');
                 }
                 
                 // 如果有有效数据，则发送到音频处理器播放
                 if (audioData.byteLength > 0) {
-                    console.log(`播放音频块: ${audioData.byteLength}字节`);
                     audioProcessor.playAudio(audioData);
-                } else {
-                    console.warn('处理后音频数据为空，跳过播放');
                 }
             } else {
-                // 可能是直接的PCM格式（没有头部信息）
-                console.log('收到直接PCM音频数据，大小:', arrayBuffer.byteLength, '字节');
-                
-                // 确保音频数据的大小是偶数字节（16位PCM需要）
+                // 直接的PCM格式（没有头部信息）
                 let audioData = arrayBuffer;
+                
+                // 确保音频数据的大小是偶数字节
                 if (audioData.byteLength % 2 !== 0) {
                     console.warn('直接PCM音频数据大小不正确（非偶数字节）:', audioData.byteLength, '字节，将进行调整');
                     audioData = audioData.slice(0, audioData.byteLength - (audioData.byteLength % 2));
-                    console.log('调整后直接PCM音频数据大小:', audioData.byteLength, '字节');
                 }
                 
                 // 播放音频
                 if (audioData.byteLength > 0) {
-                    console.log(`播放直接PCM音频: ${audioData.byteLength}字节`);
                     audioProcessor.playAudio(audioData);
                 } else {
                     console.warn('处理后直接PCM音频数据为空，跳过播放');
@@ -274,7 +277,11 @@ const websocketHandler = {
         }
     },
 
-    // 发送命令
+    /**
+     * 发送命令到服务器
+     * @param {string} command - 命令名称
+     * @param {Object} commandData - 命令附加数据
+     */
     sendCommand(command, commandData = {}) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             const message = {
@@ -285,15 +292,22 @@ const websocketHandler = {
         }
     },
 
-    // 发送停止并清空队列命令
+    /**
+     * 发送停止并清空队列命令
+     */
     sendStopAndClearQueues() {
         this.sendCommand('stop');
         this.sendCommand('clear_queues');
     },
     
-    // 发送音频数据
+    /**
+     * 发送音频数据到服务器
+     * @param {Int16Array} pcmData - PCM音频数据
+     * @param {boolean} isFirstBlock - 是否是第一个音频块
+     * @returns {boolean} 发送是否成功
+     */
     sendAudioData(pcmData, isFirstBlock = false) {
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
         
         try {
             // 创建带头部的数据缓冲区 [4字节时间戳][4字节状态标志]
@@ -307,16 +321,17 @@ const websocketHandler = {
             // 设置状态标志
             let statusFlags = 0;
             
-            // 如果是Float32Array，先计算能量值
+            // 计算音频能量值
             if (pcmData instanceof Float32Array) {
                 const audioEnergy = Math.min(255, Math.floor(this._calculateAudioLevel(pcmData) * 1000));
                 statusFlags |= audioEnergy & 0xFF;
                 
+                // 检测静音
                 if (pcmData.every(sample => Math.abs(sample) < 0.01)) {
                     statusFlags |= (1 << 8);
                 }
             } else {
-                // 对于Int16Array数据，简单设置一个默认值
+                // 对于Int16Array数据，设置默认音量
                 statusFlags |= 128;  // 中等音量
             }
             
@@ -341,7 +356,10 @@ const websocketHandler = {
         }
     },
 
-    // 检查用户是否在AI响应时开始说话
+    /**
+     * 检查用户是否在AI响应时开始说话，实现打断功能
+     * @param {Float32Array} audioData - 音频数据
+     */
     checkVoiceInterruption(audioData) {
         if (this.isAIResponding && audioProcessor.isPlaying()) {
             const volumeThreshold = 0.03;
@@ -354,7 +372,12 @@ const websocketHandler = {
         }
     },
 
-    // 计算音频能量级别
+    /**
+     * 计算音频能量级别
+     * @private
+     * @param {Float32Array} audioData - 音频数据
+     * @returns {number} 音频能量级别 (0-1)
+     */
     _calculateAudioLevel(audioData) {
         if (!audioData || audioData.length === 0) return 0;
         
