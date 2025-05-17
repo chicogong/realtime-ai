@@ -5,6 +5,8 @@ from typing import Dict, Optional, List, Any
 
 from loguru import logger
 
+from config import Config
+
 
 class SessionState:
     """Manages user session state"""
@@ -91,3 +93,30 @@ def remove_session(session_id: str) -> None:
 def get_all_sessions() -> Dict[str, SessionState]:
     """Get all active sessions"""
     return sessions 
+
+
+async def cleanup_inactive_sessions() -> None:
+    """定期清理不活跃的会话"""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            sessions = get_all_sessions()
+
+            inactive_session_ids = [
+                session_id
+                for session_id, state in sessions.items()
+                if state.is_inactive(timeout_seconds=Config.SESSION_TIMEOUT)
+            ]
+
+            for session_id in inactive_session_ids:
+                logger.info(f"清理不活跃会话: {session_id}")
+                try:
+                    if sessions[session_id].tts_processor:
+                        await sessions[session_id].tts_processor.interrupt()
+                except:
+                    pass
+                remove_session(session_id)
+
+        except Exception as e:
+            logger.error(f"会话清理错误: {e}")
+            await asyncio.sleep(60) 

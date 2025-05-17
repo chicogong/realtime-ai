@@ -1,13 +1,10 @@
 import struct
 import time
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 
 from loguru import logger
 
 from config import Config
-
-
-# 诊断功能已移除，简化代码
 
 
 class VoiceActivityDetector:
@@ -112,3 +109,39 @@ def parse_audio_header(audio_data: bytes) -> Tuple[int, int, bytes]:
     pcm_data = audio_data[8:]
 
     return timestamp, status_flags, pcm_data
+
+
+class AudioProcessor:
+    """处理音频相关的功能"""
+
+    def __init__(self) -> None:
+        self.last_audio_log_time: float = 0.0
+        self.audio_packets_received: int = 0
+        self.voice_detector = VoiceActivityDetector()
+        self.AUDIO_LOG_INTERVAL: float = 5.0
+
+    def process_audio_data(self, audio_data: bytes, session: Any) -> Tuple[bool, Optional[bytes]]:
+        """处理音频数据，返回是否有语音活动和PCM数据"""
+        if not audio_data or len(audio_data) < 10:
+            logger.warning("收到无效的音频数据: 数据为空或长度不足")
+            return False, None
+
+        try:
+            timestamp, status_flags, pcm_data = parse_audio_header(audio_data)
+
+            # 限制音频日志输出频率
+            self.audio_packets_received += 1
+            current_time = time.time()
+
+            if Config.DEBUG and current_time - self.last_audio_log_time > self.AUDIO_LOG_INTERVAL:
+                logger.debug(f"音频接收统计: {self.audio_packets_received}个数据包 (过去{self.AUDIO_LOG_INTERVAL}秒)")
+                self.last_audio_log_time = current_time
+                self.audio_packets_received = 0
+
+            # 检测是否有语音活动
+            has_voice = self.voice_detector.detect(pcm_data)
+            return has_voice, pcm_data
+
+        except Exception as e:
+            logger.error(f"处理音频头部出错: {e}")
+            return False, audio_data if len(audio_data) > 2 else None

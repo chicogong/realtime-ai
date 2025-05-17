@@ -1,57 +1,16 @@
 import asyncio
 import json
-import struct
-import time
 import uuid
-from typing import Any, Dict, Optional, Tuple, List, Union, cast
+from typing import Any, Dict, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from config import Config
-from session import get_all_sessions, get_session, remove_session, SessionState
+from session import get_session, remove_session
 from services.asr import create_asr_service, BaseASRService
-from services.llm import create_llm_service
-from services.tts import close_all_tts_services, create_tts_service
-from utils.audio import VoiceActivityDetector, parse_audio_header
-from utils.text import split_into_sentences
+from utils.audio import AudioProcessor
 from websocket.pipeline import PipelineHandler
-
-
-class AudioProcessor:
-    """处理音频相关的功能"""
-
-    def __init__(self) -> None:
-        self.last_audio_log_time: float = 0.0
-        self.audio_packets_received: int = 0
-        self.voice_detector = VoiceActivityDetector()
-        self.AUDIO_LOG_INTERVAL: float = 5.0
-
-    def process_audio_data(self, audio_data: bytes, session: Any) -> Tuple[bool, Optional[bytes]]:
-        """处理音频数据，返回是否有语音活动和PCM数据"""
-        if not audio_data or len(audio_data) < 10:
-            logger.warning("收到无效的音频数据: 数据为空或长度不足")
-            return False, None
-
-        try:
-            timestamp, status_flags, pcm_data = parse_audio_header(audio_data)
-
-            # 限制音频日志输出频率
-            self.audio_packets_received += 1
-            current_time = time.time()
-
-            if Config.DEBUG and current_time - self.last_audio_log_time > self.AUDIO_LOG_INTERVAL:
-                logger.debug(f"音频接收统计: {self.audio_packets_received}个数据包 (过去{self.AUDIO_LOG_INTERVAL}秒)")
-                self.last_audio_log_time = current_time
-                self.audio_packets_received = 0
-
-            # 检测是否有语音活动
-            has_voice = self.voice_detector.detect(pcm_data)
-            return has_voice, pcm_data
-
-        except Exception as e:
-            logger.error(f"处理音频头部出错: {e}")
-            return False, audio_data if len(audio_data) > 2 else None
 
 
 class WebSocketHandler:
@@ -217,51 +176,19 @@ class WebSocketHandler:
             logger.error(f"关闭WebSocket连接错误: {e}")
 
 
-class SessionCleaner:
-    """处理会话清理任务"""
-
-    @staticmethod
-    async def cleanup_inactive_sessions() -> None:
-        """定期清理不活跃的会话"""
-        while True:
-            try:
-                await asyncio.sleep(60)
-                sessions = get_all_sessions()
-
-                inactive_session_ids = [
-                    session_id
-                    for session_id, state in sessions.items()
-                    if state.is_inactive(timeout_seconds=Config.SESSION_TIMEOUT)
-                ]
-
-                for session_id in inactive_session_ids:
-                    logger.info(f"清理不活跃会话: {session_id}")
-                    try:
-                        if sessions[session_id].tts_processor:
-                            await sessions[session_id].tts_processor.interrupt()
-                    except:
-                        pass
-                    remove_session(session_id)
-
-            except Exception as e:
-                logger.error(f"会话清理错误: {e}")
-                await asyncio.sleep(60)
-
-
-# 导出主要的处理函数
 async def handle_websocket_connection(websocket: WebSocket) -> None:
-    """处理WebSocket连接的主入口函数"""
+    """WebSocket连接处理入口点"""
     handler = WebSocketHandler()
     await handler.handle_connection(websocket)
 
 
 async def process_final_transcript(websocket: WebSocket, text: str, session_id: str) -> None:
-    """处理最终转录文本的主入口函数"""
+    """处理最终的语音识别结果"""
+    if not text.strip():
+        return
+        
+    logger.info(f"处理最终识别结果: '{text}'")
     session = get_session(session_id)
-    if session:
-        await session.asr_queue.put(text)
-
-
-async def cleanup_inactive_sessions() -> None:
-    """清理不活跃会话的主入口函数"""
-    await SessionCleaner.cleanup_inactive_sessions()
+    
+    # 将识别结果添加到ASR队列
+    await session.asr_queue.put(text)

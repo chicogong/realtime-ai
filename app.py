@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from config import Config
+from session import cleanup_inactive_sessions
 from services.tts import close_all_tts_services
-from websocket.handler import cleanup_inactive_sessions, handle_websocket_connection
+from websocket.handler import handle_websocket_connection
 
 # Configure loguru
 logger.remove()
