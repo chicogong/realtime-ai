@@ -10,6 +10,7 @@
 
 import audioProcessor from './audio-processor.js';
 import websocketHandler from './websocket-handler.js';
+import ui from './ui.js';
 
 // 常量定义
 const CONSTANTS = {
@@ -29,48 +30,6 @@ const state = {
     needsResampling: false,        // 是否需要重采样
     isInitialAudioBlock: true      // 是否是首个音频块
 };
-
-// DOM元素缓存
-const elements = {
-    startButton: document.getElementById('start-btn'),      // 开始按钮
-    stopButton: document.getElementById('stop-btn'),        // 停止按钮
-    resetButton: document.getElementById('reset-btn'),      // 重置按钮
-    messagesContainer: document.getElementById('messages'), // 消息容器
-    statusDot: document.getElementById('status-dot'),       // 状态指示点
-    statusText: document.getElementById('status-text')      // 状态文本
-};
-
-/**
- * 状态管理类
- * 负责管理UI状态和按钮状态
- * @class StateManager
- */
-class StateManager {
-    /**
-     * 更新状态显示
-     * 更新状态指示点和状态文本
-     * @param {string} state - 状态类型（idle/listening/thinking/error）
-     * @param {string} message - 状态消息
-     */
-    static updateStatus(state, message) {
-        if (!elements.statusDot || !elements.statusText) return;
-        
-        elements.statusDot.className = state;
-        elements.statusText.textContent = message;
-    }
-
-    /**
-     * 更新按钮状态
-     * 根据会话状态启用/禁用相应按钮
-     * @param {boolean} isActive - 是否激活（true: 启用停止按钮，禁用开始按钮）
-     */
-    static updateButtonStates(isActive) {
-        if (!elements.startButton || !elements.stopButton) return;
-        
-        elements.startButton.disabled = isActive;
-        elements.stopButton.disabled = !isActive;
-    }
-}
 
 /**
  * 音频管理类
@@ -116,7 +75,7 @@ class AudioManager {
             return true;
         } catch (error) {
             console.error('音频初始化错误:', error);
-            StateManager.updateStatus('error', '麦克风访问错误');
+            ui.StateManager.updateStatus('error', '麦克风访问错误');
             return false;
         }
     }
@@ -191,8 +150,8 @@ class SessionManager {
     static async startConversation() {
         if (await AudioManager.initializeAudio()) {
             state.isSessionActive = true;
-            StateManager.updateStatus('listening', '正在听取...');
-            StateManager.updateButtonStates(true);
+            ui.StateManager.updateStatus('listening', '正在听取...');
+            ui.StateManager.updateButtonStates(true);
             websocketHandler.sendCommand('start');
         }
     }
@@ -211,8 +170,8 @@ class SessionManager {
         AudioManager.cleanup();
         websocketHandler.sendStopAndClearQueues();
 
-        StateManager.updateButtonStates(false);
-        StateManager.updateStatus('idle', '已停止');
+        ui.StateManager.updateButtonStates(false);
+        ui.StateManager.updateStatus('idle', '已停止');
     }
 
     /**
@@ -225,11 +184,11 @@ class SessionManager {
         }
 
         audioProcessor.stopAudioPlayback();
-        elements.messagesContainer.innerHTML = '';
+        ui.MessageRenderer.clearMessages();
         state.isInitialAudioBlock = true;
 
         websocketHandler.sendCommand('reset');
-        StateManager.updateStatus('idle', '已重置');
+        ui.StateManager.updateStatus('idle', '已重置');
     }
 }
 
@@ -244,31 +203,23 @@ class EventManager {
      * 设置按钮点击、音频上下文恢复等事件处理
      */
     static initialize() {
-        // 按钮事件
-        elements.startButton?.addEventListener('click', SessionManager.startConversation);
-        elements.stopButton?.addEventListener('click', SessionManager.endConversation);
-        elements.resetButton?.addEventListener('click', SessionManager.resetConversation);
-
+        ui.EventBinder.bindButtonClick('start-btn', SessionManager.startConversation);
+        ui.EventBinder.bindButtonClick('stop-btn', SessionManager.endConversation);
+        ui.EventBinder.bindButtonClick('reset-btn', SessionManager.resetConversation);
         // 音频上下文恢复
-        document.addEventListener('click', () => {
+        ui.EventBinder.bindAudioContextResume(() => {
             const audioContext = audioProcessor.getAudioContext();
             if (audioContext?.state === 'suspended') {
                 audioContext.resume().catch(console.error);
             }
         });
-
-        // 消息容器滚动优化
-        elements.messagesContainer?.addEventListener('scroll', () => {}, { passive: true });
-
         // 页面卸载清理
-        window.addEventListener('beforeunload', () => {
+        ui.EventBinder.bindPageUnload(() => {
             if (state.isSessionActive) {
                 SessionManager.endConversation();
             }
-
             const socket = websocketHandler.getSocket();
             if (socket) socket.close();
-
             const audioContext = audioProcessor.getAudioContext();
             if (audioContext) audioContext.close().catch(console.error);
         });
@@ -281,11 +232,11 @@ class EventManager {
  */
 function init() {
     try {
-        websocketHandler.initializeWebSocket(StateManager.updateStatus, elements.startButton);
+        websocketHandler.initializeWebSocket(ui.StateManager.updateStatus, ui.elements.startButton);
         EventManager.initialize();
     } catch (error) {
         console.error('应用初始化错误:', error);
-        StateManager.updateStatus('error', '初始化失败');
+        ui.StateManager.updateStatus('error', '初始化失败');
     }
 }
 

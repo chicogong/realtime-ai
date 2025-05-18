@@ -6,6 +6,7 @@
  */
 
 import audioProcessor from './audio-processor.js';
+import ui from './ui.js';
 
 // WebSocket配置常量
 const WS_CONFIG = {
@@ -83,6 +84,7 @@ const websocketHandler = {
         this.socket.onopen = () => {
             console.log('WebSocket连接成功');
             updateStatus('idle', '已连接，准备就绪');
+            this._updateStatusBox('idle', '已连接，准备就绪');
             startButton.disabled = false;
             audioProcessor.initAudioContext();
         };
@@ -182,83 +184,64 @@ const websocketHandler = {
      * @param {Function} updateStatus - 状态更新函数
      */
     _handleMessage(messageData, updateStatus) {
-        const chatList = document.querySelector('.chat-list');
-        
         switch (messageData.type) {
             case 'status':
                 // 处理会话状态信息
-                console.log(`会话状态: ${messageData.status}, 会话ID: ${messageData.session_id}`);
-                
-                // 根据状态更新UI
                 if (messageData.status === 'listening') {
-                    this._updateStatusBox('listening', '正在听取...');
+                    ui.StateManager.updateStatus('listening', '正在听取...');
                     updateStatus('listening', '正在听取...');
                 } else if (messageData.status === 'thinking') {
-                    this._updateStatusBox('thinking', 'AI思考中...');
+                    ui.StateManager.updateStatus('thinking', 'AI思考中...');
                     updateStatus('thinking', 'AI思考中...');
                 } else if (messageData.status === 'idle') {
-                    this._updateStatusBox('idle', '已完成');
+                    ui.StateManager.updateStatus('idle', '已完成');
                     updateStatus('idle', '已完成');
                 } else if (messageData.status === 'error') {
                     const errorMsg = messageData.message || '发生错误';
-                    this._updateStatusBox('error', errorMsg);
+                    ui.StateManager.updateStatus('error', errorMsg);
                     updateStatus('error', errorMsg);
                 }
                 break;
             
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
-                // 处理部分语音识别结果
-                this._updateStatusBox('listening', '正在听取...');
-                this._handleTranscript(messageData, chatList, true);
+                ui.StateManager.updateStatus('listening', '正在听取...');
+                this._handleTranscript(messageData, true);
                 break;
             
             case MESSAGE_TYPES.FINAL_TRANSCRIPT:
-                // 处理最终语音识别结果
-                this._handleTranscript(messageData, chatList, false);
+                this._handleTranscript(messageData, false);
                 break;
             
             case MESSAGE_TYPES.LLM_STATUS:
-                // 处理LLM处理状态
-                this._updateStatusBox('thinking', 'AI思考中...');
-                this._handleLLMStatus(messageData, updateStatus, chatList);
+                ui.StateManager.updateStatus('thinking', 'AI思考中...');
+                this._handleLLMStatus(messageData, updateStatus);
                 break;
             
             case MESSAGE_TYPES.LLM_RESPONSE:
-                // 处理LLM响应内容
                 if (messageData.is_complete) {
-                    this._updateStatusBox('idle', '已完成');
+                    ui.StateManager.updateStatus('idle', '已完成');
                 }
-                this._handleLLMResponse(messageData, updateStatus, chatList);
+                this._handleLLMResponse(messageData, updateStatus);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_START:
-                // 开始播放音频
-                this._updateStatusBox('thinking', '正在回复...');
-                console.log('开始播放音频, 格式:', messageData.format);
+                ui.StateManager.updateStatus('thinking', '正在回复...');
                 break;
                 
             case MESSAGE_TYPES.AUDIO_END:
-                // 音频播放结束
-                this._updateStatusBox('idle', '已完成');
-                console.log('音频播放结束');
+                ui.StateManager.updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_START:
-                // 开始TTS合成
-                this._updateStatusBox('thinking', '正在生成语音...');
-                console.log('开始播放TTS音频, 格式:', messageData.format);
+                ui.StateManager.updateStatus('thinking', '正在生成语音...');
                 break;
             
             case MESSAGE_TYPES.TTS_END:
-                // TTS合成结束
-                this._updateStatusBox('idle', '已完成');
-                console.log('TTS音频播放结束');
+                ui.StateManager.updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_STOP:
-                // 停止TTS播放
-                this._updateStatusBox('idle', '已停止');
-                console.log('停止TTS音频播放');
+                ui.StateManager.updateStatus('idle', '已停止');
                 audioProcessor.stopAudioPlayback();
                 break;
                 
@@ -276,8 +259,7 @@ const websocketHandler = {
                 break;
                 
             case MESSAGE_TYPES.ERROR:
-                // 处理错误信息
-                console.error('收到错误消息:', messageData);
+                ui.StateManager.updateStatus('error', messageData.message || '发生错误');
                 updateStatus('error', messageData.message || '发生错误');
                 break;
                 
@@ -289,69 +271,30 @@ const websocketHandler = {
     },
 
     /**
-     * 渲染消息气泡
-     * @param {string} content - 消息内容
-     * @param {boolean} isUser - 是否为用户消息
-     * @param {boolean} isPartial - 是否为部分转录
-     * @param {string} bubbleId - 可选，气泡ID
-     * @param {HTMLElement} chatList - 聊天列表元素
-     */
-    _renderChatBubble(content, isUser, isPartial, bubbleId, chatList) {
-        if (!chatList || !content.trim()) return;
-        
-        // 部分转录时复用气泡
-        if (isPartial && bubbleId) {
-            const existingBubble = document.getElementById(bubbleId);
-            if (existingBubble) {
-                const bubbleContent = existingBubble.querySelector('.chat-bubble');
-                if (bubbleContent) {
-                    bubbleContent.textContent = content;
-                    return;
-                }
-            }
-        }
-        
-        // 创建新气泡
-        const chatItem = document.createElement('div');
-        chatItem.className = `chat-item ${isUser ? 'user' : 'ai'}`;
-        if (bubbleId) chatItem.id = bubbleId;
-        
-        const bubble = document.createElement('div');
-        bubble.className = 'chat-bubble';
-        bubble.textContent = content;
-        
-        chatItem.appendChild(bubble);
-        chatList.appendChild(chatItem);
-        
-        // 滚动到底部
-        chatList.scrollTo({
-            top: chatList.scrollHeight,
-            behavior: 'smooth'
-        });
-    },
-
-    /**
      * 处理转录结果
      * 支持部分转录和最终转录两种模式
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {HTMLElement} chatList - 聊天列表元素
      * @param {boolean} isPartial - 是否为部分转录
      */
-    _handleTranscript(messageData, chatList, isPartial) {
-        if (!chatList || !messageData.content.trim()) return;
-        
-        const bubbleId = isPartial ? 'current-user-bubble' : '';
-        
-        // 最终转录时，先移除对应的部分转录气泡
-        if (!isPartial) {
-            const oldBubble = document.getElementById('current-user-bubble');
-            if (oldBubble) {
-                oldBubble.remove(); // 完全移除旧的部分转录气泡
+    _handleTranscript(messageData, isPartial) {
+        if (!messageData.content.trim()) return;
+        // 部分转录时复用气泡
+        if (isPartial) {
+            // 先移除旧的部分转录气泡
+            if (this._partialUserMsg) {
+                ui.MessageRenderer.updateMessage(this._partialUserMsg, messageData.content);
+            } else {
+                this._partialUserMsg = ui.MessageRenderer.addMessage(messageData.content, 'user', true);
             }
+        } else {
+            // 最终转录，移除部分转录气泡，添加最终气泡
+            if (this._partialUserMsg) {
+                this._partialUserMsg.remove();
+                this._partialUserMsg = null;
+            }
+            ui.MessageRenderer.addMessage(messageData.content, 'user', false);
         }
-        
-        this._renderChatBubble(messageData.content, true, isPartial, bubbleId, chatList);
     },
 
     /**
@@ -360,42 +303,18 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} chatList - 聊天列表元素
      */
-    _handleLLMStatus(messageData, updateStatus, chatList) {
-        if (!chatList) return;
-        
+    _handleLLMStatus(messageData, updateStatus) {
         if (messageData.status === 'processing') {
             updateStatus('thinking', 'AI思考中...');
             this.isAIResponding = true;
-            
             // 移除现有的AI消息容器
-            const existingContainer = document.getElementById('ai-message-container');
-            if (existingContainer) existingContainer.remove();
-            
-            // 创建新的AI消息容器
-            const chatItem = document.createElement('div');
-            chatItem.id = 'ai-message-container';
-            chatItem.className = 'chat-item ai';
-            
-            // 创建气泡
-            const bubble = document.createElement('div');
-            bubble.className = 'chat-bubble';
-            
-            // 添加输入指示器
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-            
-            bubble.appendChild(typingIndicator);
-            chatItem.appendChild(bubble);
-            chatList.appendChild(chatItem);
-            
-            // 滚动到底部
-            chatList.scrollTo({
-                top: chatList.scrollHeight,
-                behavior: 'smooth'
-            });
+            if (this._aiMsg) {
+                this._aiMsg.remove();
+                this._aiMsg = null;
+            }
+            // 添加AI输入指示器
+            this._aiMsg = ui.MessageRenderer.addMessage('', 'ai', true);
         }
     },
 
@@ -405,44 +324,20 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} chatList - 聊天列表元素
      */
-    _handleLLMResponse(messageData, updateStatus, chatList) {
-        if (!chatList) return;
-        
+    _handleLLMResponse(messageData, updateStatus) {
         // 流式响应时复用最后一个AI气泡
-        const aiMessageContainer = document.getElementById('ai-message-container');
-        
-        if (aiMessageContainer) {
-            const bubble = aiMessageContainer.querySelector('.chat-bubble');
-            if (bubble) {
-                // 清除输入指示器
-                bubble.innerHTML = '';
-                bubble.textContent = messageData.content;
-                
-                if (messageData.is_complete) {
-                    aiMessageContainer.id = '';
-                    updateStatus('idle', '已完成');
-                    this.isAIResponding = false;
-                }
-                
-                // 滚动到底部
-                chatList.scrollTo({
-                    top: chatList.scrollHeight,
-                    behavior: 'smooth'
-                });
+        if (this._aiMsg) {
+            ui.MessageRenderer.updateMessage(this._aiMsg, messageData.content);
+            if (messageData.is_complete) {
+                this._aiMsg = null;
+                updateStatus('idle', '已完成');
+                this.isAIResponding = false;
             }
         } else {
-            // 创建新气泡
-            this._renderChatBubble(
-                messageData.content,
-                false,
-                false,
-                messageData.is_complete ? '' : 'ai-message-container',
-                chatList
-            );
-            
+            this._aiMsg = ui.MessageRenderer.addMessage(messageData.content, 'ai', false);
             if (messageData.is_complete) {
+                this._aiMsg = null;
                 updateStatus('idle', '已完成');
                 this.isAIResponding = false;
             }
@@ -461,6 +356,11 @@ const websocketHandler = {
                 ...commandData
             };
             this.socket.send(JSON.stringify(message));
+            
+            // 发送start命令时立即更新状态为"listening"
+            if (command === 'start') {
+                this._updateStatusBox('listening', '正在听取...');
+            }
         }
     },
 
@@ -588,8 +488,12 @@ const websocketHandler = {
         // 更新消息文本
         statusMessage.textContent = message;
         
-        // 如果是idle状态，可以把透明度降低但不需要完全隐藏
-        if (status === 'idle') {
+        // 如果是idle状态，但是是"已连接，准备就绪"消息，则显示状态框
+        if (status === 'idle' && message === '已连接，准备就绪') {
+            statusBox.classList.remove('hidden');
+        } 
+        // 其他idle状态，可以把透明度降低但不需要完全隐藏
+        else if (status === 'idle') {
             statusBox.classList.add('hidden');
         } else {
             statusBox.classList.remove('hidden');
