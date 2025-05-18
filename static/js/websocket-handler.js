@@ -185,6 +185,22 @@ const websocketHandler = {
         const chatList = document.querySelector('.chat-list');
         
         switch (messageData.type) {
+            case 'status':
+                // 处理会话状态信息
+                console.log(`会话状态: ${messageData.status}, 会话ID: ${messageData.session_id}`);
+                
+                // 根据状态更新UI
+                if (messageData.status === 'listening') {
+                    updateStatus('listening', '正在听取...');
+                } else if (messageData.status === 'thinking') {
+                    updateStatus('thinking', 'AI思考中...');
+                } else if (messageData.status === 'idle') {
+                    updateStatus('idle', '已完成');
+                } else if (messageData.status === 'error') {
+                    updateStatus('error', messageData.message || '发生错误');
+                }
+                break;
+            
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
                 // 处理部分语音识别结果
                 this._handleTranscript(messageData, chatList, true);
