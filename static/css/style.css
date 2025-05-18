@@ -1,26 +1,44 @@
-/* Variables */
+/* ==========================================================================
+   变量定义
+   ========================================================================== */
 :root {
+    /* 主题色 */
     --primary: #4C94DD;
     --primary-dark: #2C76BC;
     --primary-light: #E8F2FD;
-    --secondary: #F0F2F5;
+    
+    /* 功能色 */
     --success: #52c41a;
     --warning: #faad14;
     --error: #ff7875;
+    
+    /* 文本色 */
     --text: #333333;
     --text-light: #666666;
     --text-lighter: #999999;
+    
+    /* 背景色 */
     --bg: #f7f9fc;
     --bg-white: #ffffff;
+    
+    /* 边框和阴影 */
     --border: #e6e8eb;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    
+    /* 圆角 */
     --radius: 8px;
     --radius-lg: 16px;
+    
+    /* 字体 */
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    
+    /* 动画 */
     --transition: all 0.2s ease;
 }
 
-/* Reset & Base Styles */
+/* ==========================================================================
+   基础样式重置
+   ========================================================================== */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -41,7 +59,9 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* Layout Components */
+/* ==========================================================================
+   布局组件
+   ========================================================================== */
 .container {
     width: 100%;
     max-width: 800px;
@@ -56,6 +76,7 @@ body {
     will-change: transform;
 }
 
+/* 头部样式 */
 header {
     display: flex;
     justify-content: space-between;
@@ -68,13 +89,13 @@ header {
     z-index: 10;
 }
 
-/* Typography */
+/* 标题样式 */
 h1 {
     font-size: 1.25rem;
     font-weight: 600;
 }
 
-/* Status Indicator */
+/* 状态指示器 */
 .status {
     display: flex;
     align-items: center;
@@ -99,7 +120,9 @@ h1 {
     font-weight: 500;
 }
 
-/* Chat Container */
+/* ==========================================================================
+   聊天容器
+   ========================================================================== */
 .chat-container {
     flex: 1;
     overflow-y: auto;
@@ -114,7 +137,7 @@ h1 {
     gap: 24px;
 }
 
-/* Message Styles */
+/* 消息样式 */
 .message {
     max-width: 85%;
     display: flex;
@@ -148,7 +171,9 @@ h1 {
     border-top-right-radius: 4px;
 }
 
-/* Typing Indicator */
+/* ==========================================================================
+   输入指示器
+   ========================================================================== */
 .typing-indicator {
     display: inline-flex;
     align-items: center;
@@ -168,7 +193,9 @@ h1 {
 .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
 .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
 
-/* Footer & Controls */
+/* ==========================================================================
+   底部控制栏
+   ========================================================================== */
 footer {
     padding: 16px 24px;
     border-top: 1px solid var(--border);
@@ -188,6 +215,7 @@ footer {
     align-items: center;
 }
 
+/* 按钮样式 */
 .action-btn {
     padding: 8px 24px;
     border-radius: 6px;
@@ -233,7 +261,9 @@ button:disabled {
     cursor: not-allowed;
 }
 
-/* Message Content Formatting */
+/* ==========================================================================
+   消息内容格式化
+   ========================================================================== */
 .message-content p { margin-bottom: 8px; }
 .message-content p:last-child { margin-bottom: 0; }
 
@@ -250,17 +280,17 @@ button:disabled {
 }
 
 .message-content pre {
-    background-color: #f8f9fa;
+    background-color: var(--bg);
     padding: 12px;
-    border-radius: 4px;
-    margin: 8px 0;
+    border-radius: var(--radius);
     overflow-x: auto;
 }
 
 .message-content code {
-    background-color: #f0f0f0;
+    background-color: var(--bg);
     padding: 2px 4px;
     border-radius: 4px;
+    font-size: 0.9em;
 }
 
 .message-content a {
@@ -274,11 +304,12 @@ button:disabled {
     border-bottom-color: var(--primary);
 }
 
-/* Animations */
+/* ==========================================================================
+   动画
+   ========================================================================== */
 @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.5); }
-    100% { transform: scale(1); }
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
 }
 
 @keyframes fadeIn {
@@ -286,7 +317,9 @@ button:disabled {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Responsive Styles */
+/* ==========================================================================
+   响应式设计
+   ========================================================================== */
 @media (max-width: 768px) {
     .container {
         height: 100vh;
@@ -298,7 +331,7 @@ button:disabled {
     }
     
     .message { 
-        max-width: 90%;
+        max-width: 95%;
     }
     
     footer { 
@@ -307,7 +340,6 @@ button:disabled {
     
     .action-btn {
         padding: 8px 16px;
-        font-size: 0.875rem;
         min-width: 70px;
     }
 }

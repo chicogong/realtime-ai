@@ -1,70 +1,94 @@
 /**
  * 音频处理模块
  * 处理音频采集、播放和转换
+ * @module audio-processor
  */
 
 // 音频配置常量
-const TARGET_SAMPLE_RATE = 16000;
-const AUDIO_CHANNELS = 1;
-const PROCESSING_BUFFER_SIZE = 4096;
+const AUDIO_CONFIG = {
+    TARGET_SAMPLE_RATE: 16000,
+    CHANNELS: 1,
+    BUFFER_SIZE: 4096,
+    PCM_BITS_PER_SAMPLE: 16,
+    PCM_BYTES_PER_SAMPLE: 2,
+    PCM_MAX_VALUE: 32768.0,
+    PCM_MIN_VALUE: -32768.0
+};
 
-// 音频相关变量
-let audioContext = null;
-let isPlayingAudio = false;
-let currentAudioSource = null;
-let pendingAudioQueue = [];
+// 音频相关状态
+const audioState = {
+    context: null,
+    isPlaying: false,
+    currentSource: null,
+    pendingQueue: []
+};
 
-// 音频处理器对象
+/**
+ * 音频处理器对象
+ * @type {Object}
+ */
 const audioProcessor = {
     // 公开配置常量
-    SAMPLE_RATE: TARGET_SAMPLE_RATE,
-    CHANNELS: AUDIO_CHANNELS,
-    BUFFER_SIZE: PROCESSING_BUFFER_SIZE,
+    SAMPLE_RATE: AUDIO_CONFIG.TARGET_SAMPLE_RATE,
+    CHANNELS: AUDIO_CONFIG.CHANNELS,
+    BUFFER_SIZE: AUDIO_CONFIG.BUFFER_SIZE,
 
-    // 初始化音频上下文
+    /**
+     * 初始化音频上下文
+     * @returns {boolean} 初始化是否成功
+     */
     initAudioContext() {
-        if (!audioContext) {
+        if (!audioState.context) {
             try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                console.log(`音频上下文已初始化，采样率: ${audioContext.sampleRate}Hz`);
+                audioState.context = new (window.AudioContext || window.webkitAudioContext)();
+                console.log(`音频上下文已初始化，采样率: ${audioState.context.sampleRate}Hz`);
                 return true;
-            } catch (e) {
-                console.error('初始化音频上下文失败:', e);
+            } catch (error) {
+                console.error('初始化音频上下文失败:', error);
                 return false;
             }
-        } else if (audioContext.state === "suspended") {
-            audioContext.resume().catch(console.error);
+        } else if (audioState.context.state === "suspended") {
+            audioState.context.resume().catch(console.error);
         }
         return true;
     },
 
-    // 获取音频上下文
+    /**
+     * 获取音频上下文
+     * @returns {AudioContext|null} 音频上下文实例
+     */
     getAudioContext() {
-        return audioContext;
+        return audioState.context;
     },
 
-    // 停止音频播放
+    /**
+     * 停止音频播放
+     */
     stopAudioPlayback() {
-        if (currentAudioSource) {
+        if (audioState.currentSource) {
             try {
-                currentAudioSource.stop();
-                currentAudioSource = null;
-            } catch (e) {
-                console.error('停止音频错误:', e);
+                audioState.currentSource.stop();
+                audioState.currentSource = null;
+            } catch (error) {
+                console.error('停止音频错误:', error);
             }
         }
-        isPlayingAudio = false;
-        pendingAudioQueue = [];
+        audioState.isPlaying = false;
+        audioState.pendingQueue = [];
     },
 
-    // 是否正在播放
+    /**
+     * 检查是否正在播放音频
+     * @returns {boolean} 是否正在播放
+     */
     isPlaying() {
-        return isPlayingAudio;
+        return audioState.isPlaying;
     },
 
     /**
      * 播放音频数据
      * @param {ArrayBuffer} audioData - 要播放的PCM音频数据
+     * @returns {Promise<void>}
      */
     async playAudio(audioData) {
         if (!this.initAudioContext() || !audioData || audioData.byteLength === 0) {
@@ -73,8 +97,8 @@ const audioProcessor = {
         
         try {
             // 如果有正在播放的音频，加入队列
-            if (isPlayingAudio && currentAudioSource) {
-                pendingAudioQueue.push(audioData);
+            if (audioState.isPlaying && audioState.currentSource) {
+                audioState.pendingQueue.push(audioData);
                 return;
             }
             
@@ -83,48 +107,52 @@ const audioProcessor = {
             if (!audioBuffer) return;
             
             // 创建音频源并播放
-            const audioSource = audioContext.createBufferSource();
+            const audioSource = audioState.context.createBufferSource();
             audioSource.buffer = audioBuffer;
-            audioSource.connect(audioContext.destination);
+            audioSource.connect(audioState.context.destination);
             
             // 保存当前音频源和状态
-            currentAudioSource = audioSource;
-            isPlayingAudio = true;
+            audioState.currentSource = audioSource;
+            audioState.isPlaying = true;
             
             // 添加播放结束事件
             audioSource.onended = () => {
-                currentAudioSource = null;
+                audioState.currentSource = null;
                 
                 // 播放队列中的下一个，使用短延迟避免衔接问题
-                if (isPlayingAudio && pendingAudioQueue.length > 0) {
+                if (audioState.isPlaying && audioState.pendingQueue.length > 0) {
                     setTimeout(() => {
-                        if (isPlayingAudio && pendingAudioQueue.length > 0) {
-                            const nextBuffer = pendingAudioQueue.shift();
+                        if (audioState.isPlaying && audioState.pendingQueue.length > 0) {
+                            const nextBuffer = audioState.pendingQueue.shift();
                             this.playAudio(nextBuffer);
                         }
                     }, 5);  // 5ms延迟，有助于音频平滑衔接
                 } else {
-                    isPlayingAudio = false;
+                    audioState.isPlaying = false;
                 }
             };
             
             // 开始播放
             audioSource.start(0);
-        } catch (e) {
-            console.error('播放音频错误:', e);
-            isPlayingAudio = false;
+        } catch (error) {
+            console.error('播放音频错误:', error);
+            audioState.isPlaying = false;
             
             // 处理队列中的下一个音频
-            if (pendingAudioQueue.length > 0) {
+            if (audioState.pendingQueue.length > 0) {
                 setTimeout(() => {
-                    const nextBuffer = pendingAudioQueue.shift();
+                    const nextBuffer = audioState.pendingQueue.shift();
                     this.playAudio(nextBuffer);
                 }, 50);  // 错误恢复延迟
             }
         }
     },
 
-    // 将PCM数据转换为AudioBuffer
+    /**
+     * 将PCM数据转换为AudioBuffer
+     * @param {ArrayBuffer} pcmData - PCM音频数据
+     * @returns {Promise<AudioBuffer|null>} 转换后的AudioBuffer
+     */
     async pcmToAudioBuffer(pcmData) {
         if (!this.initAudioContext() || !pcmData || pcmData.byteLength === 0) {
             console.warn('无效的PCM数据或音频上下文未初始化');
@@ -133,7 +161,7 @@ const audioProcessor = {
         
         try {
             // 检查是否为有效的PCM数据大小（必须是偶数字节）
-            if (pcmData.byteLength % 2 !== 0) {
+            if (pcmData.byteLength % AUDIO_CONFIG.PCM_BYTES_PER_SAMPLE !== 0) {
                 // 截断为偶数字节
                 pcmData = pcmData.slice(0, pcmData.byteLength - 1);
                 if (pcmData.byteLength === 0) {
@@ -142,16 +170,15 @@ const audioProcessor = {
             }
             
             // 获取采样率信息
-            const deviceSampleRate = audioContext.sampleRate;
-            const targetSampleRate = TARGET_SAMPLE_RATE; // 16000Hz
-            const needsResampling = deviceSampleRate !== targetSampleRate;
+            const deviceSampleRate = audioState.context.sampleRate;
+            const needsResampling = deviceSampleRate !== AUDIO_CONFIG.TARGET_SAMPLE_RATE;
             
             // 创建临时AudioBuffer
-            const sampleCount = pcmData.byteLength / 2;  // 16位PCM，每样本2字节
-            const tempBuffer = audioContext.createBuffer(
-                1,                  // 单声道
-                sampleCount,        // 样本数量
-                targetSampleRate    // 源采样率
+            const sampleCount = pcmData.byteLength / AUDIO_CONFIG.PCM_BYTES_PER_SAMPLE;
+            const tempBuffer = audioState.context.createBuffer(
+                AUDIO_CONFIG.CHANNELS,
+                sampleCount,
+                AUDIO_CONFIG.TARGET_SAMPLE_RATE
             );
             
             // 获取通道数据并将PCM转换为Float32Array
@@ -161,48 +188,63 @@ const audioProcessor = {
             for (let i = 0; i < sampleCount; i++) {
                 try {
                     // 使用小端序，因为服务器使用小端序（true）
-                    const int16Value = dataView.getInt16(i * 2, true);
+                    const int16Value = dataView.getInt16(i * AUDIO_CONFIG.PCM_BYTES_PER_SAMPLE, true);
                     // 标准化到 -1.0 到 1.0 范围
-                    channelData[i] = int16Value / 32768.0;
-                } catch (e) {
-                    console.error(`PCM数据处理错误，索引: ${i}`, e);
+                    channelData[i] = int16Value / AUDIO_CONFIG.PCM_MAX_VALUE;
+                } catch (error) {
+                    console.error(`PCM数据处理错误，索引: ${i}`, error);
                     break;
                 }
             }
             
             // 如果需要重采样
             if (needsResampling) {
-                // 创建OfflineAudioContext做重采样
-                const offlineContext = new OfflineAudioContext(
-                    1, 
-                    Math.ceil(channelData.length * deviceSampleRate / targetSampleRate), 
-                    deviceSampleRate
-                );
-                
-                // 创建BufferSource
-                const bufferSource = offlineContext.createBufferSource();
-                bufferSource.buffer = tempBuffer;
-                bufferSource.connect(offlineContext.destination);
-                bufferSource.start();
-                
-                // 执行重采样
-                try {
-                    const resampledBuffer = await offlineContext.startRendering();
-                    return resampledBuffer;
-                } catch (e) {
-                    console.error('重采样失败, 使用原始缓冲区', e);
-                    return tempBuffer;
-                }
+                return await this.resampleAudioBuffer(tempBuffer, deviceSampleRate);
             }
             
             return tempBuffer;
-        } catch (e) {
-            console.error('PCM转换失败:', e);
+        } catch (error) {
+            console.error('PCM转换失败:', error);
             return null;
         }
     },
 
-    // 重采样函数
+    /**
+     * 重采样音频缓冲区
+     * @param {AudioBuffer} buffer - 原始音频缓冲区
+     * @param {number} deviceSampleRate - 设备采样率
+     * @returns {Promise<AudioBuffer>} 重采样后的音频缓冲区
+     */
+    async resampleAudioBuffer(buffer, deviceSampleRate) {
+        try {
+            // 创建OfflineAudioContext做重采样
+            const offlineContext = new OfflineAudioContext(
+                AUDIO_CONFIG.CHANNELS,
+                Math.ceil(buffer.length * deviceSampleRate / AUDIO_CONFIG.TARGET_SAMPLE_RATE),
+                deviceSampleRate
+            );
+            
+            // 创建BufferSource
+            const bufferSource = offlineContext.createBufferSource();
+            bufferSource.buffer = buffer;
+            bufferSource.connect(offlineContext.destination);
+            bufferSource.start();
+            
+            // 执行重采样
+            return await offlineContext.startRendering();
+        } catch (error) {
+            console.error('重采样失败, 使用原始缓冲区', error);
+            return buffer;
+        }
+    },
+
+    /**
+     * 重采样函数
+     * @param {Float32Array} buffer - 输入缓冲区
+     * @param {number} inputSampleRate - 输入采样率
+     * @param {number} outputSampleRate - 输出采样率
+     * @returns {Float32Array} 重采样后的缓冲区
+     */
     downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
         if (inputSampleRate === outputSampleRate) {
             return buffer;
@@ -232,7 +274,11 @@ const audioProcessor = {
         return resultBuffer;
     },
 
-    // 从Float32转换为Int16 (PCM)
+    /**
+     * 从Float32转换为Int16 (PCM)
+     * @param {Float32Array} buffer - 输入缓冲区
+     * @returns {Int16Array} 转换后的PCM数据
+     */
     convertFloat32ToInt16(buffer) {
         const bufferLength = buffer.length;
         const outputBuffer = new Int16Array(bufferLength);
@@ -247,7 +293,11 @@ const audioProcessor = {
         return outputBuffer;
     },
 
-    // 计算音频音量
+    /**
+     * 计算音频音量
+     * @param {Float32Array} buffer - 音频缓冲区
+     * @returns {number} 音量级别 (0-1)
+     */
     detectAudioLevel(buffer) {
         if (!buffer || buffer.length === 0) return 0;
         
@@ -257,7 +307,7 @@ const audioProcessor = {
         }
         
         return sum / buffer.length;
-    },
+    }
 };
 
 // 使用ES模块导出

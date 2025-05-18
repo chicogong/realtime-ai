@@ -1,30 +1,32 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat</title>
+    <meta name="description" content="实时AI语音对话系统">
+    <meta name="theme-color" content="#4C94DD">
+    <title>AI Chat - 实时语音对话</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container">
+    <div class="container" role="main">
         <header>
             <h1>Realtime AI Chat</h1>
-            <div class="status">
-                <span id="status-dot"></span>
+            <div class="status" role="status" aria-live="polite">
+                <span id="status-dot" aria-hidden="true"></span>
                 <span id="status-text">Ready</span>
             </div>
         </header>
         
-        <main class="chat-container">
+        <main class="chat-container" role="log" aria-label="对话记录">
             <div id="messages"></div>
         </main>
         
         <footer>
             <div class="controls">
-                <button id="start-btn" class="action-btn primary-btn">Start</button>
-                <button id="stop-btn" class="action-btn stop-btn" disabled>Stop</button>
-                <button id="reset-btn" class="action-btn reset-btn">Reset</button>
+                <button id="start-btn" class="action-btn primary-btn" aria-label="开始对话">开始</button>
+                <button id="stop-btn" class="action-btn stop-btn" disabled aria-label="停止对话">停止</button>
+                <button id="reset-btn" class="action-btn reset-btn" aria-label="重置对话">重置</button>
             </div>
         </footer>
     </div>

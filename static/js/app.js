@@ -1,9 +1,19 @@
 /**
  * 实时语音对话主控制模块
+ * @module app
  */
 
 import audioProcessor from './audio-processor.js';
 import websocketHandler from './websocket-handler.js';
+
+// 常量定义
+const CONSTANTS = {
+    AUDIO_CONFIG: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+    }
+};
 
 // 状态管理
 const state = {
@@ -27,14 +37,28 @@ const elements = {
 
 /**
  * 状态管理类
+ * @class StateManager
  */
 class StateManager {
+    /**
+     * 更新状态显示
+     * @param {string} state - 状态类型
+     * @param {string} message - 状态消息
+     */
     static updateStatus(state, message) {
+        if (!elements.statusDot || !elements.statusText) return;
+        
         elements.statusDot.className = state;
         elements.statusText.textContent = message;
     }
 
+    /**
+     * 更新按钮状态
+     * @param {boolean} isActive - 是否激活
+     */
     static updateButtonStates(isActive) {
+        if (!elements.startButton || !elements.stopButton) return;
+        
         elements.startButton.disabled = isActive;
         elements.stopButton.disabled = !isActive;
     }
@@ -42,16 +66,17 @@ class StateManager {
 
 /**
  * 音频处理类
+ * @class AudioManager
  */
 class AudioManager {
+    /**
+     * 初始化音频系统
+     * @returns {Promise<boolean>} 初始化是否成功
+     */
     static async initializeAudio() {
         try {
             state.activeMediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
+                audio: CONSTANTS.AUDIO_CONFIG
             });
 
             if (!audioProcessor.initAudioContext()) {
@@ -69,17 +94,22 @@ class AudioManager {
                 audioProcessor.CHANNELS
             );
 
-            state.audioProcessorNode.onaudioprocess = this.processUserSpeech;
+            state.audioProcessorNode.onaudioprocess = this.processUserSpeech.bind(this);
             audioSource.connect(state.audioProcessorNode);
             state.audioProcessorNode.connect(audioContext.destination);
 
             return true;
         } catch (error) {
             console.error('音频初始化错误:', error);
+            StateManager.updateStatus('error', '麦克风访问错误');
             return false;
         }
     }
 
+    /**
+     * 处理用户语音数据
+     * @param {AudioProcessingEvent} event - 音频处理事件
+     */
     static processUserSpeech(event) {
         if (!state.isSessionActive || !websocketHandler.getSocket() ||
             websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
@@ -104,9 +134,13 @@ class AudioManager {
         }
     }
 
+    /**
+     * 清理音频资源
+     */
     static cleanup() {
         if (state.activeMediaStream) {
             state.activeMediaStream.getTracks().forEach(track => track.stop());
+            state.activeMediaStream = null;
         }
 
         if (state.audioProcessorNode) {
@@ -115,7 +149,7 @@ class AudioManager {
         }
 
         const audioContext = audioProcessor.getAudioContext();
-        if (audioContext && audioContext.state === "running" && !audioProcessor.isPlaying()) {
+        if (audioContext?.state === "running" && !audioProcessor.isPlaying()) {
             audioContext.suspend().catch(console.error);
         }
     }
@@ -123,19 +157,24 @@ class AudioManager {
 
 /**
  * 会话管理类
+ * @class SessionManager
  */
 class SessionManager {
+    /**
+     * 开始对话
+     */
     static async startConversation() {
         if (await AudioManager.initializeAudio()) {
             state.isSessionActive = true;
             StateManager.updateStatus('listening', '正在听取...');
             StateManager.updateButtonStates(true);
             websocketHandler.sendCommand('start');
-        } else {
-            StateManager.updateStatus('error', '麦克风访问错误');
         }
     }
 
+    /**
+     * 结束对话
+     */
     static endConversation() {
         if (!state.isSessionActive) return;
 
@@ -150,6 +189,9 @@ class SessionManager {
         StateManager.updateStatus('idle', '已停止');
     }
 
+    /**
+     * 重置对话
+     */
     static resetConversation() {
         if (state.isSessionActive) {
             this.endConversation();
@@ -165,14 +207,20 @@ class SessionManager {
 }
 
 /**
- * 事件处理类
+ * 事件管理类
+ * @class EventManager
  */
 class EventManager {
+    /**
+     * 初始化事件监听
+     */
     static initialize() {
-        elements.startButton.addEventListener('click', SessionManager.startConversation);
-        elements.stopButton.addEventListener('click', SessionManager.endConversation);
-        elements.resetButton.addEventListener('click', SessionManager.resetConversation);
+        // 按钮事件
+        elements.startButton?.addEventListener('click', SessionManager.startConversation);
+        elements.stopButton?.addEventListener('click', SessionManager.endConversation);
+        elements.resetButton?.addEventListener('click', SessionManager.resetConversation);
 
+        // 音频上下文恢复
         document.addEventListener('click', () => {
             const audioContext = audioProcessor.getAudioContext();
             if (audioContext?.state === 'suspended') {
@@ -180,10 +228,10 @@ class EventManager {
             }
         });
 
-        if (elements.messagesContainer) {
-            elements.messagesContainer.addEventListener('scroll', () => {}, { passive: true });
-        }
+        // 消息容器滚动优化
+        elements.messagesContainer?.addEventListener('scroll', () => {}, { passive: true });
 
+        // 页面卸载清理
         window.addEventListener('beforeunload', () => {
             if (state.isSessionActive) {
                 SessionManager.endConversation();
@@ -202,8 +250,13 @@ class EventManager {
  * 应用初始化
  */
 function init() {
-    websocketHandler.initializeWebSocket(StateManager.updateStatus, elements.startButton);
-    EventManager.initialize();
+    try {
+        websocketHandler.initializeWebSocket(StateManager.updateStatus, elements.startButton);
+        EventManager.initialize();
+    } catch (error) {
+        console.error('应用初始化错误:', error);
+        StateManager.updateStatus('error', '初始化失败');
+    }
 }
 
 // 启动应用
