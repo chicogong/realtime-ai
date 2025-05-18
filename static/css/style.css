@@ -125,73 +125,117 @@ h1 {
    ========================================================================== */
 .chat-container {
     flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
-}
-
-#messages {
     display: flex;
     flex-direction: column;
-    gap: 24px;
-}
-
-/* 消息样式 */
-.message {
-    max-width: 85%;
-    display: flex;
-    gap: 12px;
-    animation: fadeIn 0.3s ease;
-    will-change: transform, opacity;
-}
-
-.user-message {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-}
-
-.ai-message {
-    align-self: flex-start;
-}
-
-.message-content {
-    padding: 12px 16px;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--bg);
     border-radius: var(--radius);
-    line-height: 1.5;
 }
 
-.ai-message .message-content {
-    background-color: var(--primary-light);
-    border-top-left-radius: 4px;
+/* 聊天列表 */
+.chat-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
 }
 
-.user-message .message-content {
-    background-color: var(--secondary);
-    border-top-right-radius: 4px;
+/* 气泡基础样式 */
+.chat-item {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
 }
 
-/* ==========================================================================
-   输入指示器
-   ========================================================================== */
-.typing-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+.chat-item.user {
+    justify-content: flex-end;
 }
 
-.typing-indicator span {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background-color: var(--primary);
-    opacity: 0.7;
-    animation: pulse 1.5s infinite ease-in-out both;
-    will-change: transform;
+.chat-item.ai {
+    justify-content: flex-start;
 }
 
-.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+.chat-bubble {
+    max-width: 70%;
+    padding: 0.9rem 1.2rem;
+    border-radius: 1.2rem;
+    border: 1px solid var(--border);
+    background: var(--bg-white);
+    color: var(--text);
+    font-size: 1rem;
+    box-shadow: var(--shadow);
+    word-break: break-word;
+    transition: var(--transition);
+    position: relative;
+}
+
+.chat-item.user .chat-bubble {
+    background: var(--primary-light);
+    color: var(--text);
+    border-color: #d2e7fa;
+    border-bottom-right-radius: 0.3rem;
+}
+
+.chat-item.ai .chat-bubble {
+    background: var(--bg-white);
+    color: var(--text);
+    border-color: var(--border);
+    border-bottom-left-radius: 0.3rem;
+}
+
+/* 输入容器样式 */
+.input-container {
+    display: flex;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: var(--bg-white);
+    border-top: 1px solid var(--border);
+}
+
+.text-input {
+    flex: 1;
+    padding: 0.7rem 1rem;
+    border-radius: 1.2rem;
+    border: 1px solid var(--border);
+    font-size: 1rem;
+    outline: none;
+    transition: border var(--transition);
+    background: var(--bg);
+}
+
+.text-input:focus {
+    border-color: var(--primary-light);
+}
+
+.send-button {
+    padding: 0.7rem 1.5rem;
+    border-radius: 1.2rem;
+    font-weight: 500;
+    border: 1px solid var(--primary-light);
+    background: var(--primary-light);
+    color: var(--primary);
+    cursor: pointer;
+    transition: var(--transition);
+    font-size: 1rem;
+    white-space: nowrap;
+}
+
+.send-button:hover:not(:disabled) {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
+
+.send-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 /* ==========================================================================
    底部控制栏
@@ -208,7 +252,7 @@ footer {
     z-index: 10;
 }
 
-.controls {
+.controls, .footer-controls {
     display: flex;
     flex-direction: row;
     gap: 12px;
@@ -217,10 +261,12 @@ footer {
 
 /* 按钮样式 */
 .action-btn {
-    padding: 8px 24px;
-    border-radius: 6px;
+    padding: 0.7rem 1.5rem;
+    border-radius: 1.2rem;
     font-weight: 500;
-    border: none;
+    border: 1px solid var(--border);
+    background: var(--bg-white);
+    color: var(--primary);
     cursor: pointer;
     transition: var(--transition);
     user-select: none;
@@ -229,36 +275,76 @@ footer {
     text-align: center;
 }
 
+.action-btn:active {
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.action-btn:focus {
+    border-color: var(--primary-light);
+}
+
+.action-btn:hover:not(:disabled) {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    border-color: var(--primary-light);
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .primary-btn {
-    background-color: var(--primary);
-    color: white;
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: var(--primary-light);
 }
 
 .primary-btn:hover:not(:disabled) {
-    background-color: var(--primary-dark);
+    background: #d2e7fa;
+    color: var(--primary-dark);
 }
 
 .stop-btn {
-    background-color: #f5f5f5;
+    background: #fff0f0;
     color: #d32f2f;
+    border-color: #ffd6d6;
 }
 
 .stop-btn:hover:not(:disabled) {
-    background-color: #ffeaea;
+    background: #ffeaea;
+    color: #b71c1c;
+    border-color: #ffbdbd;
 }
 
 .reset-btn {
-    background-color: #f5f5f5;
-    color: var(--text);
+    background: var(--bg);
+    color: var(--text-light);
+    border-color: var(--border);
 }
 
 .reset-btn:hover:not(:disabled) {
-    background-color: var(--secondary);
+    background: #e6e8eb;
+    color: var(--text);
 }
 
-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+/* ==========================================================================
+   输入指示器
+   ========================================================================== */
+.typing-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.5rem;
+}
+
+.typing-indicator span {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background-color: var(--text-lighter);
+    animation: pulse 1.5s infinite ease-in-out both;
+    will-change: transform;
 }
 
 /* ==========================================================================

@@ -182,27 +182,27 @@ const websocketHandler = {
      * @param {Function} updateStatus - 状态更新函数
      */
     _handleMessage(messageData, updateStatus) {
-        const messagesContainer = document.getElementById('messages');
+        const chatList = document.querySelector('.chat-list');
         
         switch (messageData.type) {
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
                 // 处理部分语音识别结果
-                this._handleTranscript(messageData, messagesContainer, true);
+                this._handleTranscript(messageData, chatList, true);
                 break;
             
             case MESSAGE_TYPES.FINAL_TRANSCRIPT:
                 // 处理最终语音识别结果
-                this._handleTranscript(messageData, messagesContainer, false);
+                this._handleTranscript(messageData, chatList, false);
                 break;
             
             case MESSAGE_TYPES.LLM_STATUS:
                 // 处理LLM处理状态
-                this._handleLLMStatus(messageData, updateStatus, messagesContainer);
+                this._handleLLMStatus(messageData, updateStatus, chatList);
                 break;
             
             case MESSAGE_TYPES.LLM_RESPONSE:
                 // 处理LLM响应内容
-                this._handleLLMResponse(messageData, updateStatus, messagesContainer);
+                this._handleLLMResponse(messageData, updateStatus, chatList);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_START:
@@ -258,33 +258,69 @@ const websocketHandler = {
     },
 
     /**
+     * 渲染消息气泡
+     * @param {string} content - 消息内容
+     * @param {boolean} isUser - 是否为用户消息
+     * @param {boolean} isPartial - 是否为部分转录
+     * @param {string} bubbleId - 可选，气泡ID
+     * @param {HTMLElement} chatList - 聊天列表元素
+     */
+    _renderChatBubble(content, isUser, isPartial, bubbleId, chatList) {
+        if (!chatList || !content.trim()) return;
+        
+        // 部分转录时复用气泡
+        if (isPartial && bubbleId) {
+            const existingBubble = document.getElementById(bubbleId);
+            if (existingBubble) {
+                const bubbleContent = existingBubble.querySelector('.chat-bubble');
+                if (bubbleContent) {
+                    bubbleContent.textContent = content;
+                    return;
+                }
+            }
+        }
+        
+        // 创建新气泡
+        const chatItem = document.createElement('div');
+        chatItem.className = `chat-item ${isUser ? 'user' : 'ai'}`;
+        if (bubbleId) chatItem.id = bubbleId;
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble';
+        bubble.textContent = content;
+        
+        chatItem.appendChild(bubble);
+        chatList.appendChild(chatItem);
+        
+        // 滚动到底部
+        chatList.scrollTo({
+            top: chatList.scrollHeight,
+            behavior: 'smooth'
+        });
+    },
+
+    /**
      * 处理转录结果
      * 支持部分转录和最终转录两种模式
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {HTMLElement} messagesContainer - 消息容器
+     * @param {HTMLElement} chatList - 聊天列表元素
      * @param {boolean} isPartial - 是否为部分转录
      */
-    _handleTranscript(messageData, messagesContainer, isPartial) {
-        if (!messageData.content.trim()) return;
+    _handleTranscript(messageData, chatList, isPartial) {
+        if (!chatList || !messageData.content.trim()) return;
         
         const bubbleId = isPartial ? 'current-user-bubble' : '';
-        let userBubble = document.getElementById('current-user-bubble');
         
-        if (userBubble) {
-            // 更新现有气泡内容
-            userBubble.textContent = messageData.content;
-            if (!isPartial) userBubble.id = '';
-        } else {
-            // 创建新的消息气泡
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message user-message';
-            messageElement.id = bubbleId;
-            messageElement.textContent = messageData.content;
-            
-            messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        // 最终转录时，先移除对应的部分转录气泡
+        if (!isPartial) {
+            const oldBubble = document.getElementById('current-user-bubble');
+            if (oldBubble) {
+                oldBubble.remove(); // 完全移除旧的部分转录气泡
+            }
         }
+        
+        this._renderChatBubble(messageData.content, true, isPartial, bubbleId, chatList);
     },
 
     /**
@@ -293,9 +329,11 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} messagesContainer - 消息容器
+     * @param {HTMLElement} chatList - 聊天列表元素
      */
-    _handleLLMStatus(messageData, updateStatus, messagesContainer) {
+    _handleLLMStatus(messageData, updateStatus, chatList) {
+        if (!chatList) return;
+        
         if (messageData.status === 'processing') {
             updateStatus('thinking', 'AI思考中...');
             this.isAIResponding = true;
@@ -305,18 +343,28 @@ const websocketHandler = {
             if (existingContainer) existingContainer.remove();
             
             // 创建新的AI消息容器
-            const aiMessageElement = document.createElement('div');
-            aiMessageElement.id = 'ai-message-container';
-            aiMessageElement.className = 'message ai-message';
+            const chatItem = document.createElement('div');
+            chatItem.id = 'ai-message-container';
+            chatItem.className = 'chat-item ai';
+            
+            // 创建气泡
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble';
             
             // 添加输入指示器
             const typingIndicator = document.createElement('div');
             typingIndicator.className = 'typing-indicator';
             typingIndicator.innerHTML = '<span></span><span></span><span></span>';
             
-            aiMessageElement.appendChild(typingIndicator);
-            messagesContainer.appendChild(aiMessageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            bubble.appendChild(typingIndicator);
+            chatItem.appendChild(bubble);
+            chatList.appendChild(chatItem);
+            
+            // 滚动到底部
+            chatList.scrollTo({
+                top: chatList.scrollHeight,
+                behavior: 'smooth'
+            });
         }
     },
 
@@ -326,40 +374,47 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} messagesContainer - 消息容器
+     * @param {HTMLElement} chatList - 聊天列表元素
      */
-    _handleLLMResponse(messageData, updateStatus, messagesContainer) {
-        const aiMessageElement = document.getElementById('ai-message-container');
+    _handleLLMResponse(messageData, updateStatus, chatList) {
+        if (!chatList) return;
         
-        if (aiMessageElement) {
-            // 更新现有消息内容
-            aiMessageElement.innerHTML = '';
-            aiMessageElement.textContent = messageData.content;
+        // 流式响应时复用最后一个AI气泡
+        const aiMessageContainer = document.getElementById('ai-message-container');
+        
+        if (aiMessageContainer) {
+            const bubble = aiMessageContainer.querySelector('.chat-bubble');
+            if (bubble) {
+                // 清除输入指示器
+                bubble.innerHTML = '';
+                bubble.textContent = messageData.content;
+                
+                if (messageData.is_complete) {
+                    aiMessageContainer.id = '';
+                    updateStatus('idle', '已完成');
+                    this.isAIResponding = false;
+                }
+                
+                // 滚动到底部
+                chatList.scrollTo({
+                    top: chatList.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
+        } else {
+            // 创建新气泡
+            this._renderChatBubble(
+                messageData.content,
+                false,
+                false,
+                messageData.is_complete ? '' : 'ai-message-container',
+                chatList
+            );
             
             if (messageData.is_complete) {
-                // 完成响应，移除容器ID
-                aiMessageElement.id = '';
                 updateStatus('idle', '已完成');
                 this.isAIResponding = false;
-            } else {
-                // 继续显示输入指示器
-                const typingIndicator = document.createElement('div');
-                typingIndicator.className = 'typing-indicator';
-                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                aiMessageElement.appendChild(typingIndicator);
             }
-            
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        } else if (messageData.is_complete) {
-            // 创建新的消息元素
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message ai-message';
-            messageElement.textContent = messageData.content;
-            
-            messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            updateStatus('idle', '已完成');
-            this.isAIResponding = false;
         }
     },
 
