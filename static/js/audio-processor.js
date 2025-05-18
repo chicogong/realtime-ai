@@ -1,30 +1,35 @@
 /**
  * 音频处理模块
- * 处理音频采集、播放和转换
+ * 处理音频采集、播放和转换，包括：
+ * 1. 音频上下文的初始化和管理
+ * 2. PCM音频数据的播放和队列管理
+ * 3. 音频格式转换和重采样
+ * 4. 音频音量检测
  * @module audio-processor
  */
 
 // 音频配置常量
 const AUDIO_CONFIG = {
-    TARGET_SAMPLE_RATE: 16000,
-    CHANNELS: 1,
-    BUFFER_SIZE: 4096,
-    PCM_BITS_PER_SAMPLE: 16,
-    PCM_BYTES_PER_SAMPLE: 2,
-    PCM_MAX_VALUE: 32768.0,
-    PCM_MIN_VALUE: -32768.0
+    TARGET_SAMPLE_RATE: 16000,    // 目标采样率（Hz）
+    CHANNELS: 1,                   // 音频通道数（单声道）
+    BUFFER_SIZE: 4096,            // 音频缓冲区大小
+    PCM_BITS_PER_SAMPLE: 16,      // PCM采样位数
+    PCM_BYTES_PER_SAMPLE: 2,      // PCM每个采样的字节数
+    PCM_MAX_VALUE: 32768.0,       // PCM最大值（16位有符号整数）
+    PCM_MIN_VALUE: -32768.0       // PCM最小值（16位有符号整数）
 };
 
 // 音频相关状态
 const audioState = {
-    context: null,
-    isPlaying: false,
-    currentSource: null,
-    pendingQueue: []
+    context: null,        // Web Audio API上下文
+    isPlaying: false,     // 是否正在播放
+    currentSource: null,  // 当前播放的音频源
+    pendingQueue: []      // 待播放的音频队列
 };
 
 /**
  * 音频处理器对象
+ * 负责音频数据的处理、转换和播放
  * @type {Object}
  */
 const audioProcessor = {
@@ -35,6 +40,7 @@ const audioProcessor = {
 
     /**
      * 初始化音频上下文
+     * 创建Web Audio API上下文，用于音频处理
      * @returns {boolean} 初始化是否成功
      */
     initAudioContext() {
@@ -63,6 +69,7 @@ const audioProcessor = {
 
     /**
      * 停止音频播放
+     * 停止当前播放的音频并清空待播放队列
      */
     stopAudioPlayback() {
         if (audioState.currentSource) {
@@ -87,6 +94,10 @@ const audioProcessor = {
 
     /**
      * 播放音频数据
+     * 支持PCM格式的音频数据播放，包括：
+     * 1. 音频格式转换
+     * 2. 播放队列管理
+     * 3. 自动重采样（如果需要）
      * @param {ArrayBuffer} audioData - 要播放的PCM音频数据
      * @returns {Promise<void>}
      */
@@ -150,6 +161,10 @@ const audioProcessor = {
 
     /**
      * 将PCM数据转换为AudioBuffer
+     * 支持16位PCM数据的转换，包括：
+     * 1. 数据格式验证
+     * 2. 采样率转换（如果需要）
+     * 3. 数据范围标准化
      * @param {ArrayBuffer} pcmData - PCM音频数据
      * @returns {Promise<AudioBuffer|null>} 转换后的AudioBuffer
      */
@@ -211,6 +226,7 @@ const audioProcessor = {
 
     /**
      * 重采样音频缓冲区
+     * 使用OfflineAudioContext进行高质量重采样
      * @param {AudioBuffer} buffer - 原始音频缓冲区
      * @param {number} deviceSampleRate - 设备采样率
      * @returns {Promise<AudioBuffer>} 重采样后的音频缓冲区
@@ -240,6 +256,7 @@ const audioProcessor = {
 
     /**
      * 重采样函数
+     * 使用线性插值进行简单的重采样
      * @param {Float32Array} buffer - 输入缓冲区
      * @param {number} inputSampleRate - 输入采样率
      * @param {number} outputSampleRate - 输出采样率
@@ -276,6 +293,7 @@ const audioProcessor = {
 
     /**
      * 从Float32转换为Int16 (PCM)
+     * 将浮点音频数据转换为16位PCM格式
      * @param {Float32Array} buffer - 输入缓冲区
      * @returns {Int16Array} 转换后的PCM数据
      */
@@ -295,6 +313,7 @@ const audioProcessor = {
 
     /**
      * 计算音频音量
+     * 计算音频数据的平均振幅作为音量级别
      * @param {Float32Array} buffer - 音频缓冲区
      * @returns {number} 音量级别 (0-1)
      */
