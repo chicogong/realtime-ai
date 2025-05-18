@@ -191,18 +191,24 @@ const websocketHandler = {
                 
                 // 根据状态更新UI
                 if (messageData.status === 'listening') {
+                    this._updateStatusBox('listening', '正在听取...');
                     updateStatus('listening', '正在听取...');
                 } else if (messageData.status === 'thinking') {
+                    this._updateStatusBox('thinking', 'AI思考中...');
                     updateStatus('thinking', 'AI思考中...');
                 } else if (messageData.status === 'idle') {
+                    this._updateStatusBox('idle', '已完成');
                     updateStatus('idle', '已完成');
                 } else if (messageData.status === 'error') {
-                    updateStatus('error', messageData.message || '发生错误');
+                    const errorMsg = messageData.message || '发生错误';
+                    this._updateStatusBox('error', errorMsg);
+                    updateStatus('error', errorMsg);
                 }
                 break;
             
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
                 // 处理部分语音识别结果
+                this._updateStatusBox('listening', '正在听取...');
                 this._handleTranscript(messageData, chatList, true);
                 break;
             
@@ -213,36 +219,45 @@ const websocketHandler = {
             
             case MESSAGE_TYPES.LLM_STATUS:
                 // 处理LLM处理状态
+                this._updateStatusBox('thinking', 'AI思考中...');
                 this._handleLLMStatus(messageData, updateStatus, chatList);
                 break;
             
             case MESSAGE_TYPES.LLM_RESPONSE:
                 // 处理LLM响应内容
+                if (messageData.is_complete) {
+                    this._updateStatusBox('idle', '已完成');
+                }
                 this._handleLLMResponse(messageData, updateStatus, chatList);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_START:
                 // 开始播放音频
+                this._updateStatusBox('thinking', '正在回复...');
                 console.log('开始播放音频, 格式:', messageData.format);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_END:
                 // 音频播放结束
+                this._updateStatusBox('idle', '已完成');
                 console.log('音频播放结束');
                 break;
             
             case MESSAGE_TYPES.TTS_START:
                 // 开始TTS合成
+                this._updateStatusBox('thinking', '正在生成语音...');
                 console.log('开始播放TTS音频, 格式:', messageData.format);
                 break;
             
             case MESSAGE_TYPES.TTS_END:
                 // TTS合成结束
+                this._updateStatusBox('idle', '已完成');
                 console.log('TTS音频播放结束');
                 break;
             
             case MESSAGE_TYPES.TTS_STOP:
                 // 停止TTS播放
+                this._updateStatusBox('idle', '已停止');
                 console.log('停止TTS音频播放');
                 audioProcessor.stopAudioPlayback();
                 break;
@@ -547,6 +562,38 @@ const websocketHandler = {
         }
         
         return totalAmplitude / audioData.length;
+    },
+
+    /**
+     * 更新状态框
+     * @private
+     * @param {string} status - 状态类型（listening/thinking/idle/error）
+     * @param {string} message - 状态消息
+     */
+    _updateStatusBox(status, message) {
+        const statusBox = document.getElementById('status-box');
+        const statusIcon = document.getElementById('status-icon');
+        const statusMessage = document.getElementById('status-message');
+        
+        if (!statusBox || !statusIcon || !statusMessage) return;
+        
+        // 移除所有状态类
+        statusIcon.classList.remove('listening', 'thinking', 'error');
+        
+        // 添加当前状态类
+        if (['listening', 'thinking', 'error'].includes(status)) {
+            statusIcon.classList.add(status);
+        }
+        
+        // 更新消息文本
+        statusMessage.textContent = message;
+        
+        // 如果是idle状态，可以把透明度降低但不需要完全隐藏
+        if (status === 'idle') {
+            statusBox.classList.add('hidden');
+        } else {
+            statusBox.classList.remove('hidden');
+        }
     }
 };
 

@@ -12,9 +12,10 @@
     <div class="container" role="main">
         <header>
             <h1>Realtime AI Chat</h1>
-            <div class="status" role="status" aria-live="polite">
-                <span id="status-dot" aria-hidden="true"></span>
-                <span id="status-text">Ready</span>
+            <!-- 状态框 -->
+            <div id="status-box" class="status-box">
+                <div id="status-icon" class="status-icon"></div>
+                <div id="status-message">准备就绪</div>
             </div>
         </header>
         <main class="chat-container" role="log" aria-label="对话记录">
