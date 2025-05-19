@@ -46,20 +46,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="Realtime AI Chat API", lifespan=lifespan)
 
 
-@app.websocket("/ws")  # type: ignore
+@app.websocket("/ws") 
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint handling real-time communication with clients"""
     await handle_websocket_connection(websocket)
 
 
-@app.get("/", response_class=HTMLResponse)  # type: ignore
+@app.get("/", response_class=HTMLResponse) 
 async def get_root() -> HTMLResponse:
     """Return the main page HTML"""
     with open("static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 
-@app.get("/health")  # type: ignore
+@app.get("/health")
 async def health_check() -> Dict[str, str]:
     """Health check endpoint"""
     return {"status": "ok"}
