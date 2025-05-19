@@ -6,6 +6,7 @@
  */
 
 import audioProcessor from './audio-processor.js';
+import ui from './ui.js';
 
 // WebSocket配置常量
 const WS_CONFIG = {
@@ -83,6 +84,7 @@ const websocketHandler = {
         this.socket.onopen = () => {
             console.log('WebSocket连接成功');
             updateStatus('idle', '已连接，准备就绪');
+            this._updateStatusBox('idle', '已连接，准备就绪');
             startButton.disabled = false;
             audioProcessor.initAudioContext();
         };
@@ -182,52 +184,64 @@ const websocketHandler = {
      * @param {Function} updateStatus - 状态更新函数
      */
     _handleMessage(messageData, updateStatus) {
-        const messagesContainer = document.getElementById('messages');
-        
         switch (messageData.type) {
+            case 'status':
+                // 处理会话状态信息
+                if (messageData.status === 'listening') {
+                    ui.StateManager.updateStatus('listening', '正在听取...');
+                    updateStatus('listening', '正在听取...');
+                } else if (messageData.status === 'thinking') {
+                    ui.StateManager.updateStatus('thinking', 'AI思考中...');
+                    updateStatus('thinking', 'AI思考中...');
+                } else if (messageData.status === 'idle') {
+                    ui.StateManager.updateStatus('idle', '已完成');
+                    updateStatus('idle', '已完成');
+                } else if (messageData.status === 'error') {
+                    const errorMsg = messageData.message || '发生错误';
+                    ui.StateManager.updateStatus('error', errorMsg);
+                    updateStatus('error', errorMsg);
+                }
+                break;
+            
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
-                // 处理部分语音识别结果
-                this._handleTranscript(messageData, messagesContainer, true);
+                ui.StateManager.updateStatus('listening', '正在听取...');
+                this._handleTranscript(messageData, true);
                 break;
             
             case MESSAGE_TYPES.FINAL_TRANSCRIPT:
-                // 处理最终语音识别结果
-                this._handleTranscript(messageData, messagesContainer, false);
+                this._handleTranscript(messageData, false);
                 break;
             
             case MESSAGE_TYPES.LLM_STATUS:
-                // 处理LLM处理状态
-                this._handleLLMStatus(messageData, updateStatus, messagesContainer);
+                ui.StateManager.updateStatus('thinking', 'AI思考中...');
+                this._handleLLMStatus(messageData, updateStatus);
                 break;
             
             case MESSAGE_TYPES.LLM_RESPONSE:
-                // 处理LLM响应内容
-                this._handleLLMResponse(messageData, updateStatus, messagesContainer);
+                if (messageData.is_complete) {
+                    ui.StateManager.updateStatus('idle', '已完成');
+                }
+                this._handleLLMResponse(messageData, updateStatus);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_START:
-                // 开始播放音频
-                console.log('开始播放音频, 格式:', messageData.format);
+                ui.StateManager.updateStatus('thinking', '正在回复...');
                 break;
                 
             case MESSAGE_TYPES.AUDIO_END:
-                // 音频播放结束
-                console.log('音频播放结束');
+                ui.StateManager.updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_START:
-                // 开始TTS合成
-                console.log('开始播放TTS音频, 格式:', messageData.format);
+                ui.StateManager.updateStatus('thinking', '正在生成语音...');
                 break;
             
             case MESSAGE_TYPES.TTS_END:
-                // TTS合成结束
-                console.log('TTS音频播放结束');
+                ui.StateManager.updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_STOP:
-                // 停止TTS播放
-                console.log('停止TTS音频播放');
+                ui.StateManager.updateStatus('idle', '已停止');
                 audioProcessor.stopAudioPlayback();
                 break;
                 
@@ -245,8 +259,7 @@ const websocketHandler = {
                 break;
                 
             case MESSAGE_TYPES.ERROR:
-                // 处理错误信息
-                console.error('收到错误消息:', messageData);
+                ui.StateManager.updateStatus('error', messageData.message || '发生错误');
                 updateStatus('error', messageData.message || '发生错误');
                 break;
                 
@@ -262,28 +275,25 @@ const websocketHandler = {
      * 支持部分转录和最终转录两种模式
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {HTMLElement} messagesContainer - 消息容器
      * @param {boolean} isPartial - 是否为部分转录
      */
-    _handleTranscript(messageData, messagesContainer, isPartial) {
+    _handleTranscript(messageData, isPartial) {
         if (!messageData.content.trim()) return;
-        
-        const bubbleId = isPartial ? 'current-user-bubble' : '';
-        let userBubble = document.getElementById('current-user-bubble');
-        
-        if (userBubble) {
-            // 更新现有气泡内容
-            userBubble.textContent = messageData.content;
-            if (!isPartial) userBubble.id = '';
+        // 部分转录时复用气泡
+        if (isPartial) {
+            // 先移除旧的部分转录气泡
+            if (this._partialUserMsg) {
+                ui.MessageRenderer.updateMessage(this._partialUserMsg, messageData.content);
+            } else {
+                this._partialUserMsg = ui.MessageRenderer.addMessage(messageData.content, 'user', true);
+            }
         } else {
-            // 创建新的消息气泡
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message user-message';
-            messageElement.id = bubbleId;
-            messageElement.textContent = messageData.content;
-            
-            messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            // 最终转录，移除部分转录气泡，添加最终气泡
+            if (this._partialUserMsg) {
+                this._partialUserMsg.remove();
+                this._partialUserMsg = null;
+            }
+            ui.MessageRenderer.addMessage(messageData.content, 'user', false);
         }
     },
 
@@ -293,30 +303,18 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} messagesContainer - 消息容器
      */
-    _handleLLMStatus(messageData, updateStatus, messagesContainer) {
+    _handleLLMStatus(messageData, updateStatus) {
         if (messageData.status === 'processing') {
             updateStatus('thinking', 'AI思考中...');
             this.isAIResponding = true;
-            
             // 移除现有的AI消息容器
-            const existingContainer = document.getElementById('ai-message-container');
-            if (existingContainer) existingContainer.remove();
-            
-            // 创建新的AI消息容器
-            const aiMessageElement = document.createElement('div');
-            aiMessageElement.id = 'ai-message-container';
-            aiMessageElement.className = 'message ai-message';
-            
-            // 添加输入指示器
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-            
-            aiMessageElement.appendChild(typingIndicator);
-            messagesContainer.appendChild(aiMessageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            if (this._aiMsg) {
+                this._aiMsg.remove();
+                this._aiMsg = null;
+            }
+            // 添加AI输入指示器
+            this._aiMsg = ui.MessageRenderer.addMessage('', 'ai', true);
         }
     },
 
@@ -326,40 +324,23 @@ const websocketHandler = {
      * @private
      * @param {Object} messageData - 消息数据
      * @param {Function} updateStatus - 状态更新函数
-     * @param {HTMLElement} messagesContainer - 消息容器
      */
-    _handleLLMResponse(messageData, updateStatus, messagesContainer) {
-        const aiMessageElement = document.getElementById('ai-message-container');
-        
-        if (aiMessageElement) {
-            // 更新现有消息内容
-            aiMessageElement.innerHTML = '';
-            aiMessageElement.textContent = messageData.content;
-            
+    _handleLLMResponse(messageData, updateStatus) {
+        // 流式响应时复用最后一个AI气泡
+        if (this._aiMsg) {
+            ui.MessageRenderer.updateMessage(this._aiMsg, messageData.content);
             if (messageData.is_complete) {
-                // 完成响应，移除容器ID
-                aiMessageElement.id = '';
+                this._aiMsg = null;
                 updateStatus('idle', '已完成');
                 this.isAIResponding = false;
-            } else {
-                // 继续显示输入指示器
-                const typingIndicator = document.createElement('div');
-                typingIndicator.className = 'typing-indicator';
-                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                aiMessageElement.appendChild(typingIndicator);
             }
-            
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        } else if (messageData.is_complete) {
-            // 创建新的消息元素
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message ai-message';
-            messageElement.textContent = messageData.content;
-            
-            messagesContainer.appendChild(messageElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            updateStatus('idle', '已完成');
-            this.isAIResponding = false;
+        } else {
+            this._aiMsg = ui.MessageRenderer.addMessage(messageData.content, 'ai', false);
+            if (messageData.is_complete) {
+                this._aiMsg = null;
+                updateStatus('idle', '已完成');
+                this.isAIResponding = false;
+            }
         }
     },
 
@@ -375,6 +356,11 @@ const websocketHandler = {
                 ...commandData
             };
             this.socket.send(JSON.stringify(message));
+            
+            // 发送start命令时立即更新状态为"listening"
+            if (command === 'start') {
+                this._updateStatusBox('listening', '正在听取...');
+            }
         }
     },
 
@@ -476,6 +462,42 @@ const websocketHandler = {
         }
         
         return totalAmplitude / audioData.length;
+    },
+
+    /**
+     * 更新状态框
+     * @private
+     * @param {string} status - 状态类型（listening/thinking/idle/error）
+     * @param {string} message - 状态消息
+     */
+    _updateStatusBox(status, message) {
+        const statusBox = document.getElementById('status-box');
+        const statusIcon = document.getElementById('status-icon');
+        const statusMessage = document.getElementById('status-message');
+        
+        if (!statusBox || !statusIcon || !statusMessage) return;
+        
+        // 移除所有状态类
+        statusIcon.classList.remove('listening', 'thinking', 'error');
+        
+        // 添加当前状态类
+        if (['listening', 'thinking', 'error'].includes(status)) {
+            statusIcon.classList.add(status);
+        }
+        
+        // 更新消息文本
+        statusMessage.textContent = message;
+        
+        // 如果是idle状态，但是是"已连接，准备就绪"消息，则显示状态框
+        if (status === 'idle' && message === '已连接，准备就绪') {
+            statusBox.classList.remove('hidden');
+        } 
+        // 其他idle状态，可以把透明度降低但不需要完全隐藏
+        else if (status === 'idle') {
+            statusBox.classList.add('hidden');
+        } else {
+            statusBox.classList.remove('hidden');
+        }
     }
 };
 

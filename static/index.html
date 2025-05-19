@@ -12,26 +12,27 @@
     <div class="container" role="main">
         <header>
             <h1>Realtime AI Chat</h1>
-            <div class="status" role="status" aria-live="polite">
-                <span id="status-dot" aria-hidden="true"></span>
-                <span id="status-text">Ready</span>
+            <!-- 状态框 -->
+            <div id="status-box" class="status-box">
+                <div id="status-icon" class="status-icon"></div>
+                <div id="status-message">准备就绪</div>
             </div>
         </header>
-        
         <main class="chat-container" role="log" aria-label="对话记录">
-            <div id="messages"></div>
+            <div class="chat-list"></div>
+            <div class="input-container">
+                <input type="text" id="text-input" placeholder="Type a message..." class="text-input">
+                <button id="send-button" disabled class="send-button action-btn primary-btn">发送</button>
+            </div>
         </main>
-        
         <footer>
-            <div class="controls">
+            <div class="footer-controls">
                 <button id="start-btn" class="action-btn primary-btn" aria-label="开始对话">开始</button>
                 <button id="stop-btn" class="action-btn stop-btn" disabled aria-label="停止对话">停止</button>
                 <button id="reset-btn" class="action-btn reset-btn" aria-label="重置对话">重置</button>
             </div>
         </footer>
     </div>
-
-    <!-- Scripts -->
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html> 
