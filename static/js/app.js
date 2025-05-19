@@ -150,7 +150,6 @@ class SessionManager {
     static async startConversation() {
         if (await AudioManager.initializeAudio()) {
             state.isSessionActive = true;
-            ui.StateManager.updateStatus('listening', '正在听取...');
             ui.StateManager.updateButtonStates(true);
             websocketHandler.sendCommand('start');
         }
@@ -236,7 +235,6 @@ function init() {
         EventManager.initialize();
     } catch (error) {
         console.error('应用初始化错误:', error);
-        ui.StateManager.updateStatus('error', '初始化失败');
     }
 }
 
