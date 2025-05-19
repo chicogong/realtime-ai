@@ -16,7 +16,7 @@ class AzureTTSService(BaseTTSService):
     """Azure TTS服务实现"""
 
     # 全局资源
-    _http_client = None  # 共享HTTP客户端
+    _http_client: Optional[httpx.AsyncClient] = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
     def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE) -> None:
@@ -44,7 +44,7 @@ class AzureTTSService(BaseTTSService):
         Returns:
             HTTP客户端实例
         """
-        if cls._http_client is None or cls._http_client.is_closed:
+        if cls._http_client is None or (cls._http_client is not None and cls._http_client.is_closed):
             cls._http_client = httpx.AsyncClient()
         return cls._http_client
 
@@ -107,7 +107,7 @@ class AzureTTSService(BaseTTSService):
                 logger.info(f"TTS请求完成，耗时: {time.time() - start_time:.2f}秒，音频大小: {len(audio_data)} 字节")
 
                 # 检查会话是否已中断
-                from models.session import get_session
+                from session import get_session
 
                 if self.session_id is None:
                     logger.error("session_id is None")
@@ -150,7 +150,7 @@ class AzureTTSService(BaseTTSService):
                 text = item["text"]
 
                 # 检查会话是否已中断
-                from models.session import get_session
+                from session import get_session
 
                 if self.session_id is None:
                     logger.error("session_id is None")

@@ -1,19 +1,18 @@
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Dict, Any
 
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from openai import AsyncOpenAI
 
 from config import Config
-from models.session import sessions
+from session import cleanup_inactive_sessions
 from services.tts import close_all_tts_services
-from services.websocket.handler import cleanup_inactive_sessions, handle_websocket_connection
+from websocket.handler import handle_websocket_connection
 
 # Configure loguru
 logger.remove()
@@ -46,27 +45,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # Initialize FastAPI app
 app = FastAPI(title="Realtime AI Chat API", lifespan=lifespan)
 
-# Configure OpenAI client
-openai_client = AsyncOpenAI(
-    api_key=Config.OPENAI_API_KEY, base_url=Config.OPENAI_BASE_URL if Config.OPENAI_BASE_URL else None
-)
 
-
-@app.websocket("/ws")
+@app.websocket("/ws")  # type: ignore
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint handling real-time communication with clients"""
     await handle_websocket_connection(websocket)
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)  # type: ignore
 async def get_root() -> HTMLResponse:
     """Return the main page HTML"""
     with open("static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 
-@app.get("/health")
-async def health_check() -> dict:
+@app.get("/health")  # type: ignore
+async def health_check() -> Dict[str, str]:
     """Health check endpoint"""
     return {"status": "ok"}
 

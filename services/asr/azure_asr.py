@@ -6,7 +6,6 @@ import azure.cognitiveservices.speech as speechsdk
 from loguru import logger
 
 from services.asr.base import BaseASRService
-from utils.audio import AudioDiagnostics
 
 
 class AzureASRService(BaseASRService):
@@ -25,7 +24,6 @@ class AzureASRService(BaseASRService):
         self.region = region
         self.push_stream: Optional[speechsdk.audio.PushAudioInputStream] = None
         self.recognizer: Optional[speechsdk.SpeechRecognizer] = None
-        self.audio_diagnostics = AudioDiagnostics()
 
         # 初始化识别器
         self._setup_recognizer()
@@ -109,7 +107,7 @@ class AzureASRService(BaseASRService):
 
         # 只处理非空结果
         if text.strip() and self.websocket and self.loop:
-            from services.websocket.handler import process_final_transcript
+            from websocket.handler import process_final_transcript
 
             async def process_and_send_final() -> None:
                 # 发送最终识别结果
@@ -156,7 +154,7 @@ class AzureASRService(BaseASRService):
 
         # 如果有部分结果但没有生成最终结果，则使用部分结果作为最终结果
         if self.websocket and self.loop and self.last_partial_result.strip():
-            from services.websocket.handler import process_final_transcript
+            from websocket.handler import process_final_transcript
 
             async def send_final_from_partial() -> None:
                 logger.info(f"使用最后的部分结果作为最终结果: '{self.last_partial_result}'")
@@ -192,9 +190,6 @@ class AzureASRService(BaseASRService):
         if not audio_chunk or len(audio_chunk) == 0:
             logger.warning("收到空音频块")
             return
-
-        # 音频诊断
-        self.audio_diagnostics.record_chunk(audio_chunk)
 
         # 送入语音识别器
         if self.push_stream:
