@@ -28,7 +28,10 @@ const state = {
     isSessionActive: false,        // 会话是否激活
     deviceSampleRate: 0,           // 设备采样率
     needsResampling: false,        // 是否需要重采样
-    isInitialAudioBlock: true      // 是否是首个音频块
+    isInitialAudioBlock: true,     // 是否是首个音频块
+    inputContext: null,            // 输入音频上下文
+    audioBuffer: [],               // 音频缓冲区
+    processingInterval: null       // 处理间隔ID
 };
 
 /**
@@ -49,28 +52,33 @@ class AudioManager {
                 audio: CONSTANTS.AUDIO_CONFIG
             });
 
-            // 初始化音频上下文
+            // 创建专用于输入的音频上下文
+            state.inputContext = new (window.AudioContext || window.webkitAudioContext)();
+            state.deviceSampleRate = state.inputContext.sampleRate;
+            state.needsResampling = state.deviceSampleRate !== audioProcessor.SAMPLE_RATE;
+
+            // 初始化音频处理节点，仅用于播放的音频上下文
             if (!audioProcessor.initAudioContext()) {
                 throw new Error('无法初始化音频上下文');
             }
 
-            // 设置音频处理
-            const audioContext = audioProcessor.getAudioContext();
-            state.deviceSampleRate = audioContext.sampleRate;
-            state.needsResampling = state.deviceSampleRate !== audioProcessor.SAMPLE_RATE;
-
-            // 创建音频处理节点
-            const audioSource = audioContext.createMediaStreamSource(state.activeMediaStream);
-            state.audioProcessorNode = audioContext.createScriptProcessor(
-                audioProcessor.BUFFER_SIZE,
-                audioProcessor.CHANNELS,
-                audioProcessor.CHANNELS
-            );
-
-            // 设置音频处理回调
-            state.audioProcessorNode.onaudioprocess = this.processUserSpeech.bind(this);
-            audioSource.connect(state.audioProcessorNode);
-            state.audioProcessorNode.connect(audioContext.destination);
+            // 设置音频处理 - 使用AnalyserNode而非ScriptProcessor
+            const source = state.inputContext.createMediaStreamSource(state.activeMediaStream);
+            const analyser = state.inputContext.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            
+            // 创建一个时间间隔来定期处理音频数据，而不是使用ScriptProcessor
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Float32Array(bufferLength);
+            
+            // 每40毫秒处理一次音频数据，近似于常见的音频块大小
+            state.processingInterval = setInterval(() => {
+                if (!state.isSessionActive) return;
+                
+                analyser.getFloatTimeDomainData(dataArray);
+                this.processMicrophoneData(dataArray);
+            }, 40);
 
             return true;
         } catch (error) {
@@ -81,16 +89,13 @@ class AudioManager {
     }
 
     /**
-     * 处理用户语音数据
-     * 处理音频数据并发送到服务器
-     * @param {AudioProcessingEvent} event - 音频处理事件
+     * 处理麦克风数据
+     * @param {Float32Array} microphoneData 麦克风数据
      */
-    static processUserSpeech(event) {
+    static processMicrophoneData(microphoneData) {
         if (!state.isSessionActive || !websocketHandler.getSocket() ||
             websocketHandler.getSocket().readyState !== WebSocket.OPEN) return;
 
-        // 获取麦克风数据
-        const microphoneData = event.inputBuffer.getChannelData(0);
         websocketHandler.checkVoiceInterruption(microphoneData);
 
         // 处理音频数据
@@ -117,19 +122,25 @@ class AudioManager {
      * 停止所有音频流并释放资源
      */
     static cleanup() {
+        // 停止处理间隔
+        if (state.processingInterval) {
+            clearInterval(state.processingInterval);
+            state.processingInterval = null;
+        }
+
         // 停止媒体流
         if (state.activeMediaStream) {
             state.activeMediaStream.getTracks().forEach(track => track.stop());
             state.activeMediaStream = null;
         }
 
-        // 断开音频处理节点
-        if (state.audioProcessorNode) {
-            state.audioProcessorNode.disconnect();
-            state.audioProcessorNode = null;
+        // 关闭输入音频上下文
+        if (state.inputContext && state.inputContext.state !== 'closed') {
+            state.inputContext.close().catch(console.error);
+            state.inputContext = null;
         }
 
-        // 暂停音频上下文
+        // 暂停播放音频上下文
         const audioContext = audioProcessor.getAudioContext();
         if (audioContext?.state === "running" && !audioProcessor.isPlaying()) {
             audioContext.suspend().catch(console.error);
@@ -205,13 +216,18 @@ class EventManager {
         ui.EventBinder.bindButtonClick('start-btn', SessionManager.startConversation);
         ui.EventBinder.bindButtonClick('stop-btn', SessionManager.endConversation);
         ui.EventBinder.bindButtonClick('reset-btn', SessionManager.resetConversation);
+        
         // 音频上下文恢复
         ui.EventBinder.bindAudioContextResume(() => {
             const audioContext = audioProcessor.getAudioContext();
             if (audioContext?.state === 'suspended') {
                 audioContext.resume().catch(console.error);
             }
+            if (state.inputContext?.state === 'suspended') {
+                state.inputContext.resume().catch(console.error);
+            }
         });
+        
         // 页面卸载清理
         ui.EventBinder.bindPageUnload(() => {
             if (state.isSessionActive) {
@@ -219,8 +235,15 @@ class EventManager {
             }
             const socket = websocketHandler.getSocket();
             if (socket) socket.close();
+            
+            // 关闭所有音频上下文
             const audioContext = audioProcessor.getAudioContext();
-            if (audioContext) audioContext.close().catch(console.error);
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close().catch(console.error);
+            }
+            if (state.inputContext && state.inputContext.state !== 'closed') {
+                state.inputContext.close().catch(console.error);
+            }
         });
     }
 }
@@ -239,4 +262,4 @@ function init() {
 }
 
 // 启动应用
-document.addEventListener('DOMContentLoaded', init); 
+document.addEventListener('DOMContentLoaded', init);
