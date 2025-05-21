@@ -10,13 +10,26 @@
 
 // 音频配置常量
 const AUDIO_CONFIG = {
-    TARGET_SAMPLE_RATE: 16000,    // 目标采样率（Hz）
-    CHANNELS: 1,                   // 音频通道数（单声道）
-    BUFFER_SIZE: 4096,            // 音频缓冲区大小
-    PCM_BITS_PER_SAMPLE: 16,      // PCM采样位数
-    PCM_BYTES_PER_SAMPLE: 2,      // PCM每个采样的字节数
+    // 音频格式配置
+    TARGET_SAMPLE_RATE: 16000,    // 目标采样率（Hz）- 语音识别常用采样率
+    CHANNELS: 1,                   // 音频通道数（单声道）- 语音识别通常使用单声道
+    BUFFER_SIZE: 4096,            // 音频缓冲区大小（字节）- 用于音频处理和播放
+    PCM_BITS_PER_SAMPLE: 16,      // PCM采样位数 - 16位提供足够的动态范围
+    PCM_BYTES_PER_SAMPLE: 2,      // PCM每个采样的字节数 (16位 = 2字节)
     PCM_MAX_VALUE: 32768.0,       // PCM最大值（16位有符号整数）
-    PCM_MIN_VALUE: -32768.0       // PCM最小值（16位有符号整数）
+    PCM_MIN_VALUE: -32768.0,      // PCM最小值（16位有符号整数）
+
+    // 音频处理配置
+    PROCESSING_INTERVAL: 40,      // 音频处理间隔（毫秒）- 平衡实时性和性能
+    AUDIO_HEADER_SIZE: 8,         // 音频数据头部大小（字节）- 用于WebSocket传输
+    VOLUME_THRESHOLD: 0.03,       // 音量检测阈值 - 用于打断检测
+    SILENCE_THRESHOLD: 0.01,      // 静音检测阈值 - 用于语音活动检测
+    DEFAULT_VOLUME: 128,          // 默认音量值（0-255）- 中等音量
+
+    // 音频播放配置
+    PLAYBACK_DELAY: 5,           // 音频播放延迟（毫秒）- 用于平滑衔接
+    ERROR_RECOVERY_DELAY: 50,     // 错误恢复延迟（毫秒）- 用于错误处理
+    QUEUE_CHECK_INTERVAL: 100     // 队列检查间隔（毫秒）- 用于播放队列管理
 };
 
 // 音频相关状态
@@ -37,6 +50,7 @@ const audioProcessor = {
     SAMPLE_RATE: AUDIO_CONFIG.TARGET_SAMPLE_RATE,
     CHANNELS: AUDIO_CONFIG.CHANNELS,
     BUFFER_SIZE: AUDIO_CONFIG.BUFFER_SIZE,
+    AUDIO_CONFIG: AUDIO_CONFIG,  // 导出完整的音频配置
 
     /**
      * 初始化音频上下文

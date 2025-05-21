@@ -15,9 +15,10 @@ import ui from './ui.js';
 // 常量定义
 const CONSTANTS = {
     AUDIO_CONFIG: {
-        echoCancellation: true,    // 回声消除
-        noiseSuppression: true,    // 噪声抑制
-        autoGainControl: true      // 自动增益控制
+        echoCancellation: true,     // 回声消除
+        noiseSuppression: true,     // 噪声抑制
+        autoGainControl: true,      // 自动增益控制
+        PROCESSING_INTERVAL: 40     // 音频处理间隔 每40毫秒处理一次音频数据，近似于常见的音频块大小
     }
 };
 
@@ -78,7 +79,7 @@ class AudioManager {
                 
                 analyser.getFloatTimeDomainData(dataArray);
                 this.processMicrophoneData(dataArray);
-            }, 40);
+            }, audioProcessor.AUDIO_CONFIG.PROCESSING_INTERVAL);
 
             return true;
         } catch (error) {

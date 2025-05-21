@@ -11,10 +11,6 @@ import ui from './ui.js';
 // WebSocket配置常量
 const WS_CONFIG = {
     RECONNECT_DELAY: 5000,        // 重连延迟时间（毫秒）
-    AUDIO_HEADER_SIZE: 8,         // 音频数据头部大小（字节）
-    VOLUME_THRESHOLD: 0.03,       // 音量检测阈值，用于打断检测
-    SILENCE_THRESHOLD: 0.01,      // 静音检测阈值
-    DEFAULT_VOLUME: 128           // 默认音量值（中等音量）
 };
 
 // 消息类型常量
@@ -54,6 +50,24 @@ const websocketHandler = {
     socket: null,          // WebSocket连接实例
     isAIResponding: false, // AI是否正在响应
     statusCallback: null,  // 状态更新回调函数
+    audioConfig: null,     // 音频配置
+
+    /**
+     * 获取音频配置
+     * @private
+     * @returns {Object} 音频配置对象
+     */
+    _getAudioConfig() {
+        if (!this.audioConfig) {
+            this.audioConfig = {
+                AUDIO_HEADER_SIZE: audioProcessor.AUDIO_CONFIG.AUDIO_HEADER_SIZE,
+                VOLUME_THRESHOLD: audioProcessor.AUDIO_CONFIG.VOLUME_THRESHOLD,
+                SILENCE_THRESHOLD: audioProcessor.AUDIO_CONFIG.SILENCE_THRESHOLD,
+                DEFAULT_VOLUME: audioProcessor.AUDIO_CONFIG.DEFAULT_VOLUME
+            };
+        }
+        return this.audioConfig;
+    },
 
     /**
      * 获取当前WebSocket连接
@@ -396,9 +410,10 @@ const websocketHandler = {
         if (!this.socket?.readyState === WebSocket.OPEN) return false;
         
         try {
+            const audioConfig = this._getAudioConfig();
             // 创建带头部的数据缓冲区
-            const combinedBuffer = new ArrayBuffer(WS_CONFIG.AUDIO_HEADER_SIZE + pcmData.byteLength);
-            const headerView = new DataView(combinedBuffer, 0, WS_CONFIG.AUDIO_HEADER_SIZE);
+            const combinedBuffer = new ArrayBuffer(audioConfig.AUDIO_HEADER_SIZE + pcmData.byteLength);
+            const headerView = new DataView(combinedBuffer, 0, audioConfig.AUDIO_HEADER_SIZE);
             
             // 设置时间戳（毫秒）
             headerView.setUint32(0, Date.now(), true);
@@ -412,12 +427,12 @@ const websocketHandler = {
                 statusFlags |= audioEnergy & 0xFF;
                 
                 // 检测静音
-                if (pcmData.every(sample => Math.abs(sample) < WS_CONFIG.SILENCE_THRESHOLD)) {
+                if (pcmData.every(sample => Math.abs(sample) < audioConfig.SILENCE_THRESHOLD)) {
                     statusFlags |= STATUS_FLAGS.SILENCE;
                 }
             } else {
                 // 对于Int16Array数据，设置默认音量
-                statusFlags |= WS_CONFIG.DEFAULT_VOLUME;
+                statusFlags |= audioConfig.DEFAULT_VOLUME;
             }
             
             // 设置首个音频块标志
@@ -428,7 +443,7 @@ const websocketHandler = {
             headerView.setUint32(4, statusFlags, true);
             
             // 复制PCM数据到缓冲区
-            new Uint8Array(combinedBuffer, WS_CONFIG.AUDIO_HEADER_SIZE).set(
+            new Uint8Array(combinedBuffer, audioConfig.AUDIO_HEADER_SIZE).set(
                 new Uint8Array(pcmData.buffer || pcmData)
             );
             
@@ -448,8 +463,9 @@ const websocketHandler = {
     checkVoiceInterruption(audioData) {
         if (this.isAIResponding && audioProcessor.isPlaying()) {
             const audioLevel = this._calculateAudioLevel(audioData);
+            const audioConfig = this._getAudioConfig();
             
-            if (audioLevel > WS_CONFIG.VOLUME_THRESHOLD) {
+            if (audioLevel > audioConfig.VOLUME_THRESHOLD) {
                 console.log('检测到用户打断，音频能量:', audioLevel);
                 this.sendCommand('interrupt');
             }
