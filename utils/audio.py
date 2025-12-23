@@ -19,7 +19,7 @@ class VoiceActivityDetector:
         self.energy_threshold = energy_threshold
         self.frame_count = 0
         self.voice_frames = 0
-        self.reset_interval = 20  # 每隔多少帧重置计数
+        self.reset_interval = 20  # 每隔多少帧重置计数，用于防止计数器过大
 
     def reset(self) -> None:
         """重置检测器状态"""
@@ -30,7 +30,7 @@ class VoiceActivityDetector:
         """检测音频块中是否包含语音
 
         Args:
-            audio_chunk: 音频数据块
+            audio_chunk: 音频数据块，16位PCM格式
 
         Returns:
             如果检测到语音，返回True
@@ -38,7 +38,7 @@ class VoiceActivityDetector:
         if not audio_chunk or len(audio_chunk) < 10:
             return False
 
-        # 仅每N帧检查一次
+        # 仅每N帧检查一次，避免过于频繁的检测
         self.frame_count += 1
         if self.frame_count > self.reset_interval:
             self.reset()
@@ -115,13 +115,22 @@ class AudioProcessor:
     """处理音频相关的功能"""
 
     def __init__(self) -> None:
+        """初始化音频处理器"""
         self.last_audio_log_time: float = 0.0
         self.audio_packets_received: int = 0
         self.voice_detector = VoiceActivityDetector()
-        self.AUDIO_LOG_INTERVAL: float = 5.0
+        self.AUDIO_LOG_INTERVAL: float = 5.0  # 音频日志输出间隔（秒）
 
     def process_audio_data(self, audio_data: bytes, session: Any) -> Tuple[bool, Optional[bytes]]:
-        """处理音频数据，返回是否有语音活动和PCM数据"""
+        """处理音频数据，返回是否有语音活动和PCM数据
+
+        Args:
+            audio_data: 原始音频数据，包含头部信息
+            session: 当前会话对象
+
+        Returns:
+            Tuple[bool, Optional[bytes]]: (是否有语音活动, PCM数据)
+        """
         if not audio_data or len(audio_data) < 10:
             logger.warning("收到无效的音频数据: 数据为空或长度不足")
             return False, None
@@ -129,7 +138,7 @@ class AudioProcessor:
         try:
             timestamp, status_flags, pcm_data = parse_audio_header(audio_data)
 
-            # 限制音频日志输出频率
+            # 限制音频日志输出频率，避免日志过多
             self.audio_packets_received += 1
             current_time = time.time()
 

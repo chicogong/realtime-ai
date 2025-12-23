@@ -11,10 +11,6 @@ import ui from './ui.js';
 // WebSocket配置常量
 const WS_CONFIG = {
     RECONNECT_DELAY: 5000,        // 重连延迟时间（毫秒）
-    AUDIO_HEADER_SIZE: 8,         // 音频数据头部大小（字节）
-    VOLUME_THRESHOLD: 0.03,       // 音量检测阈值，用于打断检测
-    SILENCE_THRESHOLD: 0.01,      // 静音检测阈值
-    DEFAULT_VOLUME: 128           // 默认音量值（中等音量）
 };
 
 // 消息类型常量
@@ -53,6 +49,25 @@ const STATUS_FLAGS = {
 const websocketHandler = {
     socket: null,          // WebSocket连接实例
     isAIResponding: false, // AI是否正在响应
+    statusCallback: null,  // 状态更新回调函数
+    audioConfig: null,     // 音频配置
+
+    /**
+     * 获取音频配置
+     * @private
+     * @returns {Object} 音频配置对象
+     */
+    _getAudioConfig() {
+        if (!this.audioConfig) {
+            this.audioConfig = {
+                AUDIO_HEADER_SIZE: audioProcessor.AUDIO_CONFIG.AUDIO_HEADER_SIZE,
+                VOLUME_THRESHOLD: audioProcessor.AUDIO_CONFIG.VOLUME_THRESHOLD,
+                SILENCE_THRESHOLD: audioProcessor.AUDIO_CONFIG.SILENCE_THRESHOLD,
+                DEFAULT_VOLUME: audioProcessor.AUDIO_CONFIG.DEFAULT_VOLUME
+            };
+        }
+        return this.audioConfig;
+    },
 
     /**
      * 获取当前WebSocket连接
@@ -69,6 +84,7 @@ const websocketHandler = {
      * @param {HTMLButtonElement} startButton - 开始按钮元素，用于控制按钮状态
      */
     initializeWebSocket(updateStatus, startButton) {
+        this.statusCallback = updateStatus;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
@@ -83,19 +99,18 @@ const websocketHandler = {
         // 连接成功处理
         this.socket.onopen = () => {
             console.log('WebSocket连接成功');
-            updateStatus('idle', '已连接，准备就绪');
-            this._updateStatusBox('idle', '已连接，准备就绪');
+            this._updateStatus('idle', '已连接，准备就绪');
             startButton.disabled = false;
             audioProcessor.initAudioContext();
         };
         
         // 消息处理
-        this.socket.onmessage = (event) => this._handleSocketMessage(event, updateStatus);
+        this.socket.onmessage = (event) => this._handleSocketMessage(event);
         
         // 连接关闭处理
         this.socket.onclose = () => {
             console.log('WebSocket连接关闭');
-            updateStatus('error', '连接已断开');
+            this._updateStatus('error', '连接已断开');
             startButton.disabled = true;
             
             // 延迟重连
@@ -108,8 +123,27 @@ const websocketHandler = {
         // 错误处理
         this.socket.onerror = (error) => {
             console.error('WebSocket错误:', error);
-            updateStatus('error', '连接错误');
+            this._updateStatus('error', '连接错误');
         };
+    },
+
+    /**
+     * 更新状态（集中处理状态更新）
+     * @private
+     * @param {string} state - 状态类型
+     * @param {string} message - 状态消息
+     */
+    _updateStatus(state, message) {
+        // 更新UI状态
+        ui.StateManager.updateStatus(state, message);
+        
+        // 回调外部状态更新函数（如果存在）
+        if (this.statusCallback) {
+            this.statusCallback(state, message);
+        }
+        
+        // 更新状态框
+        this._updateStatusBox(state, message);
     },
 
     /**
@@ -117,14 +151,13 @@ const websocketHandler = {
      * 根据消息类型分发到不同的处理函数
      * @private
      * @param {MessageEvent} event - WebSocket消息事件
-     * @param {Function} updateStatus - 状态更新函数
      */
-    _handleSocketMessage(event, updateStatus) {
+    _handleSocketMessage(event) {
         try {
             if (typeof event.data === 'string') {
                 // 处理JSON格式的消息
                 const messageData = JSON.parse(event.data);
-                this._handleMessage(messageData, updateStatus);
+                this._handleMessage(messageData);
             } else if (event.data instanceof Blob) {
                 // 处理二进制音频数据
                 this._handleReceivedAudioData(event.data);
@@ -181,30 +214,25 @@ const websocketHandler = {
      * 根据消息类型分发到不同的处理函数
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {Function} updateStatus - 状态更新函数
      */
-    _handleMessage(messageData, updateStatus) {
+    _handleMessage(messageData) {
         switch (messageData.type) {
             case 'status':
                 // 处理会话状态信息
                 if (messageData.status === 'listening') {
-                    ui.StateManager.updateStatus('listening', '正在听取...');
-                    updateStatus('listening', '正在听取...');
+                    this._updateStatus('listening', '正在听取...');
                 } else if (messageData.status === 'thinking') {
-                    ui.StateManager.updateStatus('thinking', 'AI思考中...');
-                    updateStatus('thinking', 'AI思考中...');
+                    this._updateStatus('thinking', 'AI思考中...');
                 } else if (messageData.status === 'idle') {
-                    ui.StateManager.updateStatus('idle', '已完成');
-                    updateStatus('idle', '已完成');
+                    this._updateStatus('idle', '已完成');
                 } else if (messageData.status === 'error') {
                     const errorMsg = messageData.message || '发生错误';
-                    ui.StateManager.updateStatus('error', errorMsg);
-                    updateStatus('error', errorMsg);
+                    this._updateStatus('error', errorMsg);
                 }
                 break;
             
             case MESSAGE_TYPES.PARTIAL_TRANSCRIPT:
-                ui.StateManager.updateStatus('listening', '正在听取...');
+                this._updateStatus('listening', '正在听取...');
                 this._handleTranscript(messageData, true);
                 break;
             
@@ -213,35 +241,35 @@ const websocketHandler = {
                 break;
             
             case MESSAGE_TYPES.LLM_STATUS:
-                ui.StateManager.updateStatus('thinking', 'AI思考中...');
-                this._handleLLMStatus(messageData, updateStatus);
+                this._updateStatus('thinking', 'AI思考中...');
+                this._handleLLMStatus(messageData);
                 break;
             
             case MESSAGE_TYPES.LLM_RESPONSE:
                 if (messageData.is_complete) {
-                    ui.StateManager.updateStatus('idle', '已完成');
+                    this._updateStatus('idle', '已完成');
                 }
-                this._handleLLMResponse(messageData, updateStatus);
+                this._handleLLMResponse(messageData);
                 break;
                 
             case MESSAGE_TYPES.AUDIO_START:
-                ui.StateManager.updateStatus('thinking', '正在回复...');
+                this._updateStatus('thinking', '正在回复...');
                 break;
                 
             case MESSAGE_TYPES.AUDIO_END:
-                ui.StateManager.updateStatus('idle', '已完成');
+                this._updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_START:
-                ui.StateManager.updateStatus('thinking', '正在生成语音...');
+                this._updateStatus('thinking', '正在生成语音...');
                 break;
             
             case MESSAGE_TYPES.TTS_END:
-                ui.StateManager.updateStatus('idle', '已完成');
+                this._updateStatus('idle', '已完成');
                 break;
             
             case MESSAGE_TYPES.TTS_STOP:
-                ui.StateManager.updateStatus('idle', '已停止');
+                this._updateStatus('idle', '已停止');
                 audioProcessor.stopAudioPlayback();
                 break;
                 
@@ -249,7 +277,7 @@ const websocketHandler = {
                 // 处理字幕信息
                 console.log(`收到字幕: ${messageData.content}, 是否完成: ${messageData.is_complete}`);
                 break;
-            
+                
             case MESSAGE_TYPES.SERVER_INTERRUPT:
             case MESSAGE_TYPES.INTERRUPT_ACKNOWLEDGED:
             case MESSAGE_TYPES.STOP_ACKNOWLEDGED:
@@ -259,8 +287,9 @@ const websocketHandler = {
                 break;
                 
             case MESSAGE_TYPES.ERROR:
-                ui.StateManager.updateStatus('error', messageData.message || '发生错误');
-                updateStatus('error', messageData.message || '发生错误');
+                // 处理错误消息
+                console.error(`服务器错误: ${messageData.message}`);
+                this._updateStatus('error', messageData.message || '发生错误');
                 break;
                 
             default:
@@ -302,11 +331,9 @@ const websocketHandler = {
      * 显示AI思考状态和输入指示器
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {Function} updateStatus - 状态更新函数
      */
-    _handleLLMStatus(messageData, updateStatus) {
+    _handleLLMStatus(messageData) {
         if (messageData.status === 'processing') {
-            updateStatus('thinking', 'AI思考中...');
             this.isAIResponding = true;
             // 移除现有的AI消息容器
             if (this._aiMsg) {
@@ -323,22 +350,19 @@ const websocketHandler = {
      * 显示AI的响应内容，支持流式响应
      * @private
      * @param {Object} messageData - 消息数据
-     * @param {Function} updateStatus - 状态更新函数
      */
-    _handleLLMResponse(messageData, updateStatus) {
+    _handleLLMResponse(messageData) {
         // 流式响应时复用最后一个AI气泡
         if (this._aiMsg) {
             ui.MessageRenderer.updateMessage(this._aiMsg, messageData.content);
             if (messageData.is_complete) {
                 this._aiMsg = null;
-                updateStatus('idle', '已完成');
                 this.isAIResponding = false;
             }
         } else {
             this._aiMsg = ui.MessageRenderer.addMessage(messageData.content, 'ai', false);
             if (messageData.is_complete) {
                 this._aiMsg = null;
-                updateStatus('idle', '已完成');
                 this.isAIResponding = false;
             }
         }
@@ -359,7 +383,7 @@ const websocketHandler = {
             
             // 发送start命令时立即更新状态为"listening"
             if (command === 'start') {
-                this._updateStatusBox('listening', '正在听取...');
+                this._updateStatus('listening', '正在听取...');
             }
         }
     },
@@ -386,9 +410,10 @@ const websocketHandler = {
         if (!this.socket?.readyState === WebSocket.OPEN) return false;
         
         try {
+            const audioConfig = this._getAudioConfig();
             // 创建带头部的数据缓冲区
-            const combinedBuffer = new ArrayBuffer(WS_CONFIG.AUDIO_HEADER_SIZE + pcmData.byteLength);
-            const headerView = new DataView(combinedBuffer, 0, WS_CONFIG.AUDIO_HEADER_SIZE);
+            const combinedBuffer = new ArrayBuffer(audioConfig.AUDIO_HEADER_SIZE + pcmData.byteLength);
+            const headerView = new DataView(combinedBuffer, 0, audioConfig.AUDIO_HEADER_SIZE);
             
             // 设置时间戳（毫秒）
             headerView.setUint32(0, Date.now(), true);
@@ -402,12 +427,12 @@ const websocketHandler = {
                 statusFlags |= audioEnergy & 0xFF;
                 
                 // 检测静音
-                if (pcmData.every(sample => Math.abs(sample) < WS_CONFIG.SILENCE_THRESHOLD)) {
+                if (pcmData.every(sample => Math.abs(sample) < audioConfig.SILENCE_THRESHOLD)) {
                     statusFlags |= STATUS_FLAGS.SILENCE;
                 }
             } else {
                 // 对于Int16Array数据，设置默认音量
-                statusFlags |= WS_CONFIG.DEFAULT_VOLUME;
+                statusFlags |= audioConfig.DEFAULT_VOLUME;
             }
             
             // 设置首个音频块标志
@@ -418,7 +443,7 @@ const websocketHandler = {
             headerView.setUint32(4, statusFlags, true);
             
             // 复制PCM数据到缓冲区
-            new Uint8Array(combinedBuffer, WS_CONFIG.AUDIO_HEADER_SIZE).set(
+            new Uint8Array(combinedBuffer, audioConfig.AUDIO_HEADER_SIZE).set(
                 new Uint8Array(pcmData.buffer || pcmData)
             );
             
@@ -438,8 +463,9 @@ const websocketHandler = {
     checkVoiceInterruption(audioData) {
         if (this.isAIResponding && audioProcessor.isPlaying()) {
             const audioLevel = this._calculateAudioLevel(audioData);
+            const audioConfig = this._getAudioConfig();
             
-            if (audioLevel > WS_CONFIG.VOLUME_THRESHOLD) {
+            if (audioLevel > audioConfig.VOLUME_THRESHOLD) {
                 console.log('检测到用户打断，音频能量:', audioLevel);
                 this.sendCommand('interrupt');
             }
