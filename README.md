@@ -7,26 +7,26 @@
 [![OpenAI](https://img.shields.io/badge/OpenAI-Compatible-412991?style=flat-square&logo=openai&logoColor=white)](https://openai.com/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
+[English](README.en.md) | 中文
+
 一个低延迟、高质量的实时语音对话平台，允许用户通过麦克风与AI进行自然对话。系统采用流式处理架构，支持动态对话流程，包括实时打断和智能转向检测。
 
-A low-latency, high-quality real-time voice conversation platform that allows users to have natural conversations with AI through a microphone. The system uses a streaming architecture, supporting dynamic conversation flow with real-time interruption and intelligent turn detection.
-
-## 系统架构 / Architecture
+## 系统架构
 
 ```mermaid
 graph TB
-    subgraph Client["🌐 Client (Web Browser)"]
-        MIC[🎤 Microphone]
-        SPK[🔊 Speaker]
+    subgraph Client["🌐 客户端 (Web Browser)"]
+        MIC[🎤 麦克风]
+        SPK[🔊 扬声器]
         UI[Web UI]
     end
 
-    subgraph Server["⚙️ Server (FastAPI)"]
+    subgraph Server["⚙️ 服务器 (FastAPI)"]
         WS[WebSocket Handler]
         
-        subgraph Pipeline["Voice Processing Pipeline"]
+        subgraph Pipeline["语音处理管道"]
             STT[🗣️ STT<br/>Azure Speech]
-            LLM[🧠 LLM<br/>OpenAI/Local]
+            LLM[🧠 LLM<br/>OpenAI/本地]
             TTS[🔈 TTS<br/>Azure/MiniMax]
         end
         
@@ -34,29 +34,29 @@ graph TB
         VAD[Voice Activity<br/>Detection]
     end
 
-    MIC -->|PCM Audio| WS
-    WS -->|Audio Stream| STT
-    STT -->|Text| LLM
-    LLM -->|Response| TTS
-    TTS -->|PCM Audio| WS
-    WS -->|Audio Stream| SPK
+    MIC -->|PCM 音频| WS
+    WS -->|音频流| STT
+    STT -->|文本| LLM
+    LLM -->|响应文本| TTS
+    TTS -->|PCM 音频| WS
+    WS -->|音频流| SPK
     
-    WS <-->|State Sync| SM
-    WS -->|Interruption| VAD
+    WS <-->|状态同步| SM
+    WS -->|打断检测| VAD
     
-    UI <-->|Commands| WS
+    UI <-->|控制命令| WS
 ```
 
-### 数据流程 / Data Flow
+### 数据流程
 
 ```mermaid
 graph LR
-    A[🎤 Microphone] -->|PCM Capture| B[WebSocket]
-    B -->|Audio Stream| C[STT]
-    C -->|Text| D[LLM]
-    D -->|Response| E[TTS]
-    E -->|Audio Stream| F[WebSocket]
-    F -->|PCM Playback| G[🔊 Speaker]
+    A[🎤 麦克风] -->|PCM采集| B[WebSocket]
+    B -->|音频流| C[STT]
+    C -->|文本| D[LLM]
+    D -->|响应| E[TTS]
+    E -->|音频流| F[WebSocket]
+    F -->|PCM播放| G[🔊 扬声器]
     
     style A fill:#e1f5fe
     style G fill:#e1f5fe
