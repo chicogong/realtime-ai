@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -84,6 +85,69 @@ class TestSessionState:
         assert session.llm_queue.empty()
         assert session.tts_queue.empty()
 
+    def test_cancel_pipeline_tasks_empty(self) -> None:
+        """Test canceling pipeline tasks when empty"""
+        session = SessionState("test-session")
+        # Should not raise error
+        session._cancel_pipeline_tasks()
+        assert session.pipeline_tasks == []
+
+    def test_cancel_pipeline_tasks_with_tasks(self) -> None:
+        """Test canceling pipeline tasks with active tasks"""
+        session = SessionState("test-session")
+
+        # Create mock tasks
+        mock_task1 = MagicMock()
+        mock_task1.done.return_value = False
+        mock_task2 = MagicMock()
+        mock_task2.done.return_value = True  # Already done
+
+        session.pipeline_tasks = [mock_task1, mock_task2]
+
+        session._cancel_pipeline_tasks()
+
+        mock_task1.cancel.assert_called_once()
+        mock_task2.cancel.assert_not_called()  # Already done
+        assert session.pipeline_tasks == []
+
+    def test_cancel_pipeline_tasks_with_llm_task(self) -> None:
+        """Test canceling LLM task"""
+        session = SessionState("test-session")
+
+        mock_llm_task = MagicMock()
+        mock_llm_task.done.return_value = False
+        session.current_llm_task = mock_llm_task
+
+        session._cancel_pipeline_tasks()
+
+        mock_llm_task.cancel.assert_called_once()
+        assert session.current_llm_task is None
+
+    def test_cancel_pipeline_tasks_with_tts_task(self) -> None:
+        """Test canceling TTS task"""
+        session = SessionState("test-session")
+
+        mock_tts_task = MagicMock()
+        mock_tts_task.done.return_value = False
+        session.current_tts_task = mock_tts_task
+
+        session._cancel_pipeline_tasks()
+
+        mock_tts_task.cancel.assert_called_once()
+        assert session.current_tts_task is None
+
+    def test_cancel_pipeline_tasks_with_done_llm_task(self) -> None:
+        """Test that done LLM task is not canceled"""
+        session = SessionState("test-session")
+
+        mock_llm_task = MagicMock()
+        mock_llm_task.done.return_value = True
+        session.current_llm_task = mock_llm_task
+
+        session._cancel_pipeline_tasks()
+
+        mock_llm_task.cancel.assert_not_called()
+
 
 class TestSessionManagement:
     """Tests for session management functions"""
@@ -138,3 +202,80 @@ class TestSessionManagement:
         assert "session-1" in all_sessions
         assert "session-2" in all_sessions
         assert "session-3" in all_sessions
+
+
+class TestCleanupInactiveSessions:
+    """Tests for cleanup_inactive_sessions function"""
+
+    def setup_method(self) -> None:
+        """Clear sessions before each test"""
+        _sessions.clear()
+
+    def teardown_method(self) -> None:
+        """Clear sessions after each test"""
+        _sessions.clear()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_inactive_sessions(self) -> None:
+        """Test that cleanup removes inactive sessions"""
+        from session import cleanup_inactive_sessions
+
+        # Create a session and make it inactive
+        session = get_session("inactive-session")
+        session.last_activity = time.time() - 1000  # Very old
+
+        # Run cleanup briefly
+        with patch("session.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            # Make sleep raise after first iteration
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+
+            try:
+                await cleanup_inactive_sessions()
+            except asyncio.CancelledError:
+                pass
+
+        # Session should be removed
+        assert "inactive-session" not in _sessions
+
+    @pytest.mark.asyncio
+    async def test_cleanup_keeps_active_sessions(self) -> None:
+        """Test that cleanup keeps active sessions"""
+        from session import cleanup_inactive_sessions
+
+        # Create an active session
+        session = get_session("active-session")
+        session.last_activity = time.time()  # Just now
+
+        with patch("session.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+
+            try:
+                await cleanup_inactive_sessions()
+            except asyncio.CancelledError:
+                pass
+
+        # Session should still exist
+        assert "active-session" in _sessions
+
+    @pytest.mark.asyncio
+    async def test_cleanup_handles_tts_interrupt_error(self) -> None:
+        """Test cleanup handles TTS interrupt errors gracefully"""
+        from session import cleanup_inactive_sessions
+
+        # Create an inactive session with TTS processor
+        session = get_session("session-with-tts")
+        session.last_activity = time.time() - 1000
+        mock_tts = AsyncMock()
+        mock_tts.interrupt.side_effect = Exception("TTS error")
+        session.tts_processor = mock_tts
+
+        with patch("session.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+
+            try:
+                await cleanup_inactive_sessions()
+            except asyncio.CancelledError:
+                pass
+
+        # Session should be removed despite TTS error
+        assert "session-with-tts" not in _sessions
