@@ -9,27 +9,58 @@
 
 一个低延迟、高质量的实时语音对话平台，允许用户通过麦克风与AI进行自然对话。系统采用流式处理架构，支持动态对话流程，包括实时打断和智能转向检测。
 
-## 系统架构
+A low-latency, high-quality real-time voice conversation platform that allows users to have natural conversations with AI through a microphone. The system uses a streaming architecture, supporting dynamic conversation flow with real-time interruption and intelligent turn detection.
 
-![系统架构图]
+## 系统架构 / Architecture
 
-- **客户端**：基于Web浏览器的轻量级界面
-- **通信层**：WebSocket双向实时通信
-- **服务器**：FastAPI异步处理框架
-- **语音处理管道**：
-  - 语音到文本转换(STT)
-  - 大语言模型(LLM)处理
-  - 文本到语音合成(TTS)
-- **支持服务**：转向检测、对话状态管理
+```mermaid
+graph TB
+    subgraph Client["🌐 Client (Web Browser)"]
+        MIC[🎤 Microphone]
+        SPK[🔊 Speaker]
+        UI[Web UI]
+    end
 
-## 核心技术
+    subgraph Server["⚙️ Server (FastAPI)"]
+        WS[WebSocket Handler]
+        
+        subgraph Pipeline["Voice Processing Pipeline"]
+            STT[🗣️ STT<br/>Azure Speech]
+            LLM[🧠 LLM<br/>OpenAI/Local]
+            TTS[🔈 TTS<br/>Azure/MiniMax]
+        end
+        
+        SM[Session Manager]
+        VAD[Voice Activity<br/>Detection]
+    end
 
-### 数据流程
-
+    MIC -->|PCM Audio| WS
+    WS -->|Audio Stream| STT
+    STT -->|Text| LLM
+    LLM -->|Response| TTS
+    TTS -->|PCM Audio| WS
+    WS -->|Audio Stream| SPK
+    
+    WS <-->|State Sync| SM
+    WS -->|Interruption| VAD
+    
+    UI <-->|Commands| WS
 ```
-客户端麦克风 → PCM音频采集 → WebSocket传输 → 服务端STT → LLM处理
-         ↑                                                  ↓
-客户端扬声器 ← PCM音频播放 ← WebSocket传输 ← 服务端TTS ← 文本响应
+
+### 数据流程 / Data Flow
+
+```mermaid
+graph LR
+    A[🎤 Microphone] -->|PCM Capture| B[WebSocket]
+    B -->|Audio Stream| C[STT]
+    C -->|Text| D[LLM]
+    D -->|Response| E[TTS]
+    E -->|Audio Stream| F[WebSocket]
+    F -->|PCM Playback| G[🔊 Speaker]
+    
+    style A fill:#e1f5fe
+    style G fill:#e1f5fe
+    style D fill:#fff3e0
 ```
 
 ### WebSocket协议
