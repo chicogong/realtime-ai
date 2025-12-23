@@ -6,6 +6,10 @@
 [![Azure Speech](https://img.shields.io/badge/Azure-Speech%20Services-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/ai-services/speech-services)
 [![OpenAI](https://img.shields.io/badge/OpenAI-Compatible-412991?style=flat-square&logo=openai&logoColor=white)](https://openai.com/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-114%20passed-success?style=flat-square&logo=pytest&logoColor=white)](tests/)
+[![Coverage](https://img.shields.io/badge/Coverage-63%25-yellow?style=flat-square&logo=codecov&logoColor=white)](tests/)
+[![Code Style](https://img.shields.io/badge/Code%20Style-Ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff)
+[![Pre-commit](https://img.shields.io/badge/Pre--commit-enabled-brightgreen?style=flat-square&logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 
 English | [中文](README.md)
 
