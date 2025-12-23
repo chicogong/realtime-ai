@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestCreateLLMService:
     """Tests for create_llm_service function"""

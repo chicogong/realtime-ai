@@ -1,7 +1,5 @@
 """Unit tests for app.py - FastAPI application"""
 
-import asyncio
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -69,7 +67,7 @@ class TestLifespan:
         from app import lifespan
 
         # Verify it's an async context manager
-        assert hasattr(lifespan, "__call__")
+        assert callable(lifespan)
 
     @pytest.mark.asyncio
     async def test_create_app_with_lifespan(self) -> None:

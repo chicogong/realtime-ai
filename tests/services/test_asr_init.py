@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestCreateASRService:
     """Tests for create_asr_service function"""

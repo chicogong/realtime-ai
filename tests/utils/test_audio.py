@@ -1,7 +1,7 @@
 """Unit tests for utils/audio.py"""
 
 import struct
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

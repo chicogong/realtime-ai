@@ -1,7 +1,8 @@
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Dict
+from pathlib import Path
+from typing import AsyncGenerator, Dict, Optional
 
 import uvicorn
 from fastapi import FastAPI, WebSocket
@@ -12,6 +13,9 @@ from loguru import logger
 from services.tts import close_all_tts_services
 from session import cleanup_inactive_sessions
 from websocket.handler import handle_websocket_connection
+
+# Module-level cache for HTML content
+_html_cache: Optional[str] = None
 
 
 def configure_logger() -> None:
@@ -25,9 +29,23 @@ def configure_logger() -> None:
     )
 
 
+def _load_html_cache() -> None:
+    """Load HTML content into cache at startup"""
+    global _html_cache
+    html_path = Path("static/index.html")
+    if html_path.exists():
+        _html_cache = html_path.read_text(encoding="utf-8")
+        logger.info("HTML content cached successfully")
+    else:
+        logger.warning("static/index.html not found, cache not loaded")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup and shutdown processes"""
+    # Startup: Cache HTML content
+    _load_html_cache()
+
     # Startup: Initialize background tasks
     cleanup_task = asyncio.create_task(cleanup_inactive_sessions())
     logger.info("Application started, listening for WebSocket connections")
@@ -65,7 +83,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 
 async def get_root() -> HTMLResponse:
-    """Return the main page HTML"""
+    """Return the main page HTML from cache"""
+    global _html_cache
+    if _html_cache is not None:
+        return HTMLResponse(content=_html_cache)
+    # Fallback: read from disk if cache is empty
     with open("static/index.html", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
