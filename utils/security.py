@@ -1,6 +1,6 @@
 """Security utilities for handling sensitive data"""
 
-from typing import Any, Dict, Set, Union
+from typing import Any, Dict, Set
 
 
 class SensitiveDataMasker:
