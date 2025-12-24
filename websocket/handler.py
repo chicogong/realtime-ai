@@ -9,7 +9,7 @@ from loguru import logger
 from services.asr import BaseASRService, create_asr_service
 from session import get_session, remove_session
 from utils.audio import AudioProcessor
-from websocket.models import parse_command
+from websocket.models import TextInputCommand, parse_command
 from websocket.pipeline import PipelineHandler
 
 
@@ -49,11 +49,9 @@ class WebSocketHandler:
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
             try:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"WebSocket error: {str(e)}",
-                    "session_id": session_id
-                })
+                await websocket.send_json(
+                    {"type": "error", "message": f"WebSocket error: {str(e)}", "session_id": session_id}
+                )
             except Exception:
                 pass
         finally:
@@ -63,11 +61,9 @@ class WebSocketHandler:
         """Setup ASR service for the session"""
         asr_service = create_asr_service()
         if not asr_service:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Could not create ASR service",
-                "session_id": session_id
-            })
+            await websocket.send_json(
+                {"type": "error", "message": "Could not create ASR service", "session_id": session_id}
+            )
             await websocket.close()
             return None
 
@@ -90,10 +86,7 @@ class WebSocketHandler:
         while True:
             try:
                 # Add timeout to prevent zombie connections
-                data = await asyncio.wait_for(
-                    websocket.receive(),
-                    timeout=MESSAGE_TIMEOUT
-                )
+                data = await asyncio.wait_for(websocket.receive(), timeout=MESSAGE_TIMEOUT)
                 if "bytes" in data:
                     await self._handle_audio_data(data["bytes"], asr_service, session_id)
                 elif "text" in data:
@@ -121,14 +114,18 @@ class WebSocketHandler:
             # Check if voice should interrupt ongoing processing
             if session and has_voice and (session.is_tts_active or session.is_processing_llm):
                 if self.audio_processor.voice_detector.has_continuous_voice():
-                    logger.info(f"Detected significant voice input, interrupting current response, session ID: {session_id}")
+                    logger.info(
+                        f"Detected significant voice input, interrupting current response, session ID: {session_id}"
+                    )
                     session.request_interrupt()
                     self.audio_processor.voice_detector.reset()
 
             # Feed audio to ASR
             asr_service.feed_audio(pcm_data)
 
-    async def _handle_text_command(self, text: str, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
+    async def _handle_text_command(
+        self, text: str, websocket: WebSocket, asr_service: BaseASRService, session_id: str
+    ) -> None:
         """Process text commands from client"""
         try:
             message = json.loads(text)
@@ -137,11 +134,13 @@ class WebSocketHandler:
             command = parse_command(message)
             if not command:
                 logger.warning(f"Invalid or unknown command: {message.get('type')}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Invalid command type: {message.get('type')}",
-                    "session_id": session_id
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Invalid command type: {message.get('type')}",
+                        "session_id": session_id,
+                    }
+                )
                 return
 
             # Route commands to appropriate handlers
@@ -155,24 +154,18 @@ class WebSocketHandler:
             handler = command_handlers.get(command.type)
             if handler:
                 await handler(websocket, asr_service, session_id)
-            elif command.type == "text_input":
+            elif command.type == "text_input" and isinstance(command, TextInputCommand):
                 # Handle text input separately since it needs the text parameter
                 await self._handle_text_input_command(websocket, command.text, session_id)
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in command: {e}")
-            await websocket.send_json({
-                "type": "error",
-                "message": "Invalid JSON format",
-                "session_id": session_id
-            })
+            await websocket.send_json({"type": "error", "message": "Invalid JSON format", "session_id": session_id})
         except Exception as e:
             logger.error(f"Command processing error: {e}")
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Command error: {str(e)}",
-                "session_id": session_id
-            })
+            await websocket.send_json(
+                {"type": "error", "message": f"Command error: {str(e)}", "session_id": session_id}
+            )
 
     async def _handle_stop_command(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """Handle stop command - stop all processing"""
@@ -183,12 +176,14 @@ class WebSocketHandler:
         if session:
             session.request_interrupt()
 
-        await websocket.send_json({
-            "type": "stop_acknowledged",
-            "message": "All processing stopped",
-            "queues_cleared": True,
-            "session_id": session_id
-        })
+        await websocket.send_json(
+            {
+                "type": "stop_acknowledged",
+                "message": "All processing stopped",
+                "queues_cleared": True,
+                "session_id": session_id,
+            }
+        )
 
     async def _handle_reset_command(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
         """Handle reset command - recreate ASR service"""
@@ -206,23 +201,20 @@ class WebSocketHandler:
                 new_asr_service.setup_handlers()
                 await new_asr_service.start_recognition()
         else:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Could not create new ASR service",
-                "session_id": session_id
-            })
+            await websocket.send_json(
+                {"type": "error", "message": "Could not create new ASR service", "session_id": session_id}
+            )
 
-    async def _handle_interrupt_command(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
+    async def _handle_interrupt_command(
+        self, websocket: WebSocket, asr_service: BaseASRService, session_id: str
+    ) -> None:
         """Handle interrupt command - stop current processing but keep connection"""
         logger.info(f"Interrupt command received, session ID: {session_id}")
 
         session = get_session(session_id)
         if session:
             session.request_interrupt()
-            await websocket.send_json({
-                "type": "interrupt_acknowledged",
-                "session_id": session_id
-            })
+            await websocket.send_json({"type": "interrupt_acknowledged", "session_id": session_id})
         else:
             logger.error(f"Cannot get session {session_id}, unable to process interrupt command")
 
@@ -235,17 +227,16 @@ class WebSocketHandler:
         logger.info(f"Text input received: '{text[:50]}...', session ID: {session_id}")
 
         # Send transcript to client (echo back user input) - use final_transcript type
-        await websocket.send_json({
-            "type": "final_transcript",
-            "content": text,
-            "is_partial": False,
-            "session_id": session_id
-        })
+        await websocket.send_json(
+            {"type": "final_transcript", "content": text, "is_partial": False, "session_id": session_id}
+        )
 
         # Process the text through LLM pipeline
         await process_final_transcript(websocket, text, session_id)
 
-    async def _cleanup(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str, pipeline: PipelineHandler) -> None:
+    async def _cleanup(
+        self, websocket: WebSocket, asr_service: BaseASRService, session_id: str, pipeline: PipelineHandler
+    ) -> None:
         """Clean up resources when connection ends"""
         # Stop ASR service
         if asr_service:

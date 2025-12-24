@@ -44,7 +44,7 @@ class TestStaticFiles:
 
         app = create_app()
         # Check that /static route exists
-        routes = [route.path for route in app.routes]
+        routes = [getattr(route, "path", str(route)) for route in app.routes]
         assert any("/static" in str(route) for route in routes)
 
 
@@ -103,7 +103,7 @@ class TestCreateApp:
         from app import create_app
 
         app = create_app()
-        route_paths = [route.path for route in app.routes]
+        route_paths = [getattr(route, "path", "") for route in app.routes]
 
         assert "/" in route_paths
         assert "/health" in route_paths

@@ -55,9 +55,7 @@ class TestCreateTTSService:
 
     @patch("services.tts.AzureTTSService")
     @patch("services.tts.Config")
-    def test_create_azure_tts_success(
-        self, mock_config: MagicMock, mock_azure_service: MagicMock
-    ) -> None:
+    def test_create_azure_tts_success(self, mock_config: MagicMock, mock_azure_service: MagicMock) -> None:
         """Test successful Azure TTS creation"""
         mock_config.TTS_PROVIDER = "azure"
         mock_config.AZURE_SPEECH_KEY = "test-key"
@@ -74,9 +72,7 @@ class TestCreateTTSService:
 
     @patch("services.tts.MiniMaxTTSService")
     @patch("services.tts.Config")
-    def test_create_minimax_tts_success(
-        self, mock_config: MagicMock, mock_minimax_service: MagicMock
-    ) -> None:
+    def test_create_minimax_tts_success(self, mock_config: MagicMock, mock_minimax_service: MagicMock) -> None:
         """Test successful MiniMax TTS creation"""
         mock_config.TTS_PROVIDER = "minimax"
         mock_config.MINIMAX_API_KEY = "test-api-key"
@@ -92,9 +88,7 @@ class TestCreateTTSService:
 
     @patch("services.tts.AzureTTSService")
     @patch("services.tts.Config")
-    def test_create_tts_with_session_id(
-        self, mock_config: MagicMock, mock_azure_service: MagicMock
-    ) -> None:
+    def test_create_tts_with_session_id(self, mock_config: MagicMock, mock_azure_service: MagicMock) -> None:
         """Test TTS creation with session ID"""
         mock_config.TTS_PROVIDER = "azure"
         mock_config.AZURE_SPEECH_KEY = "test-key"
@@ -112,9 +106,7 @@ class TestCreateTTSService:
 
     @patch("services.tts.AzureTTSService")
     @patch("services.tts.Config")
-    def test_create_tts_exception(
-        self, mock_config: MagicMock, mock_azure_service: MagicMock
-    ) -> None:
+    def test_create_tts_exception(self, mock_config: MagicMock, mock_azure_service: MagicMock) -> None:
         """Test TTS creation with exception"""
         mock_config.TTS_PROVIDER = "azure"
         mock_config.AZURE_SPEECH_KEY = "test-key"
@@ -135,8 +127,7 @@ class TestCloseAllTTSServices:
     @pytest.mark.asyncio
     async def test_close_all_azure(self) -> None:
         """Test closing all Azure TTS services"""
-        with patch("services.tts.Config") as mock_config, \
-             patch("services.tts.AzureTTSService") as mock_azure_service:
+        with patch("services.tts.Config") as mock_config, patch("services.tts.AzureTTSService") as mock_azure_service:
             mock_config.TTS_PROVIDER = "azure"
             mock_azure_service.close_all = AsyncMock()
 
@@ -147,8 +138,9 @@ class TestCloseAllTTSServices:
     @pytest.mark.asyncio
     async def test_close_all_minimax(self) -> None:
         """Test closing all MiniMax TTS services"""
-        with patch("services.tts.Config") as mock_config, \
-             patch("services.tts.MiniMaxTTSService") as mock_minimax_service:
+        with patch("services.tts.Config") as mock_config, patch(
+            "services.tts.MiniMaxTTSService"
+        ) as mock_minimax_service:
             mock_config.TTS_PROVIDER = "minimax"
             mock_minimax_service.close_all = AsyncMock()
 

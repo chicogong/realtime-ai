@@ -64,8 +64,7 @@ class HTTPClientManager:
             )
 
             logger.debug(
-                f"Created HTTP client: max_connections={max_connections}, "
-                f"keepalive={max_keepalive_connections}"
+                f"Created HTTP client: max_connections={max_connections}, " f"keepalive={max_keepalive_connections}"
             )
 
             return cls._client

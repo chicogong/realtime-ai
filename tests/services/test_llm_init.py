@@ -29,9 +29,7 @@ class TestCreateLLMService:
 
     @patch("services.llm.OpenAIService")
     @patch("services.llm.Config")
-    def test_create_openai_success(
-        self, mock_config: MagicMock, mock_openai_service: MagicMock
-    ) -> None:
+    def test_create_openai_success(self, mock_config: MagicMock, mock_openai_service: MagicMock) -> None:
         """Test successful OpenAI LLM creation"""
         mock_config.LLM_PROVIDER = "openai"
         mock_config.OPENAI_API_KEY = "test-api-key"
@@ -48,9 +46,7 @@ class TestCreateLLMService:
 
     @patch("services.llm.OpenAIService")
     @patch("services.llm.Config")
-    def test_create_llm_exception(
-        self, mock_config: MagicMock, mock_openai_service: MagicMock
-    ) -> None:
+    def test_create_llm_exception(self, mock_config: MagicMock, mock_openai_service: MagicMock) -> None:
         """Test LLM creation with exception"""
         mock_config.LLM_PROVIDER = "openai"
         mock_config.OPENAI_API_KEY = "test-api-key"

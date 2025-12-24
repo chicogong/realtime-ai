@@ -42,9 +42,7 @@ class TestCreateASRService:
 
     @patch("services.asr.AzureASRService")
     @patch("services.asr.Config")
-    def test_create_azure_asr_success(
-        self, mock_config: MagicMock, mock_azure_service: MagicMock
-    ) -> None:
+    def test_create_azure_asr_success(self, mock_config: MagicMock, mock_azure_service: MagicMock) -> None:
         """Test successful Azure ASR creation"""
         mock_config.ASR_PROVIDER = "azure"
         mock_config.AZURE_SPEECH_KEY = "test-key"
@@ -61,9 +59,7 @@ class TestCreateASRService:
 
     @patch("services.asr.AzureASRService")
     @patch("services.asr.Config")
-    def test_create_asr_exception(
-        self, mock_config: MagicMock, mock_azure_service: MagicMock
-    ) -> None:
+    def test_create_asr_exception(self, mock_config: MagicMock, mock_azure_service: MagicMock) -> None:
         """Test ASR creation with exception"""
         mock_config.ASR_PROVIDER = "azure"
         mock_config.AZURE_SPEECH_KEY = "test-key"

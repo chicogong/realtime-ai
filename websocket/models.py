@@ -1,6 +1,6 @@
 """WebSocket message models for validation using Pydantic"""
 
-from typing import Literal, Optional, Union
+from typing import Dict, Literal, Optional, Type, Union
 
 from pydantic import BaseModel
 
@@ -40,6 +40,10 @@ class TextInputCommand(WebSocketCommand):
 
     type: Literal["text_input"] = "text_input"
     text: str
+
+
+# Type alias for all command types
+AnyCommand = Union[StopCommand, StartCommand, ResetCommand, InterruptCommand, TextInputCommand]
 
 
 class WebSocketResponse(BaseModel):
@@ -101,7 +105,7 @@ class LLMStreamResponse(WebSocketResponse):
     is_final: bool = False
 
 
-def parse_command(data: dict) -> Optional[Union[WebSocketCommand, "TextInputCommand"]]:
+def parse_command(data: Dict[str, object]) -> Optional[AnyCommand]:
     """Parse and validate a WebSocket command
 
     Args:
@@ -111,8 +115,10 @@ def parse_command(data: dict) -> Optional[Union[WebSocketCommand, "TextInputComm
         Validated command model or None if invalid
     """
     cmd_type = data.get("type")
+    if not isinstance(cmd_type, str):
+        return None
 
-    command_models = {
+    command_models: Dict[str, Type[WebSocketCommand]] = {
         "stop": StopCommand,
         "start": StartCommand,
         "reset": ResetCommand,
@@ -123,7 +129,7 @@ def parse_command(data: dict) -> Optional[Union[WebSocketCommand, "TextInputComm
     model_class = command_models.get(cmd_type)
     if model_class:
         try:
-            return model_class(**data)
+            return model_class(**data)  # type: ignore[arg-type, return-value]
         except Exception:
             return None
     return None

@@ -70,7 +70,7 @@ class SessionState:
         self.pipeline_tasks.clear()
 
         # Cancel individual tasks
-        for task_attr in ['current_llm_task', 'current_tts_task']:
+        for task_attr in ["current_llm_task", "current_tts_task"]:
             task = getattr(self, task_attr)
             if task and not task.done():
                 task.cancel()
@@ -133,11 +133,7 @@ async def cleanup_inactive_sessions() -> None:
 
             # Get inactive sessions with lock
             with _sessions_lock:
-                inactive_session_ids = [
-                    session_id
-                    for session_id, state in _sessions.items()
-                    if state.is_inactive()
-                ]
+                inactive_session_ids = [session_id for session_id, state in _sessions.items() if state.is_inactive()]
 
             for session_id in inactive_session_ids:
                 logger.info(f"Cleaning up inactive session: {session_id}")

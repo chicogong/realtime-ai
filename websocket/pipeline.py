@@ -22,11 +22,13 @@ class PipelineHandler:
 
     async def start_pipeline(self) -> None:
         """Start all pipeline processing tasks"""
-        self.session.pipeline_tasks.extend([
-            asyncio.create_task(self._process_asr_queue()),
-            asyncio.create_task(self._process_llm_queue()),
-            asyncio.create_task(self._process_tts_queue())
-        ])
+        self.session.pipeline_tasks.extend(
+            [
+                asyncio.create_task(self._process_asr_queue()),
+                asyncio.create_task(self._process_llm_queue()),
+                asyncio.create_task(self._process_tts_queue()),
+            ]
+        )
 
     async def _process_asr_queue(self) -> None:
         """Process ASR results and send to LLM queue"""
@@ -78,9 +80,7 @@ class PipelineHandler:
                     self.session.current_llm_task.cancel()
 
                 # Create new LLM task
-                self.session.current_llm_task = asyncio.create_task(
-                    self._process_llm_response(text)
-                )
+                self.session.current_llm_task = asyncio.create_task(self._process_llm_response(text))
 
                 self.session.llm_queue.task_done()
 
@@ -115,46 +115,26 @@ class PipelineHandler:
                 complete_sentences, sentence_buffer = process_streaming_text(chunk, sentence_buffer)
 
                 # Update subtitle in real-time
-                await self._send_websocket_message(
-                    "subtitle",
-                    content=current_subtitle,
-                    is_complete=False
-                )
+                await self._send_websocket_message("subtitle", content=current_subtitle, is_complete=False)
 
                 # Process complete sentences for TTS
                 for sentence in complete_sentences:
                     logger.info(f"LLM generated sentence: {sentence}")
-                    await self._send_websocket_message(
-                        "subtitle",
-                        content=sentence,
-                        is_complete=True
-                    )
+                    await self._send_websocket_message("subtitle", content=sentence, is_complete=True)
                     await self.session.tts_queue.put(sentence)
 
                 # Send streaming LLM response
-                await self._send_websocket_message(
-                    "llm_response",
-                    content=collected_response,
-                    is_complete=False
-                )
+                await self._send_websocket_message("llm_response", content=collected_response, is_complete=False)
 
             # Process remaining text if any
             if sentence_buffer and not self.session.is_interrupted():
                 logger.info(f"LLM final sentence: {sentence_buffer}")
-                await self._send_websocket_message(
-                    "subtitle",
-                    content=sentence_buffer,
-                    is_complete=True
-                )
+                await self._send_websocket_message("subtitle", content=sentence_buffer, is_complete=True)
                 await self.session.tts_queue.put(sentence_buffer)
 
             # Send final complete response
             if not self.session.is_interrupted():
-                await self._send_websocket_message(
-                    "llm_response",
-                    content=collected_response,
-                    is_complete=True
-                )
+                await self._send_websocket_message("llm_response", content=collected_response, is_complete=True)
 
         except asyncio.CancelledError:
             pass
@@ -180,9 +160,7 @@ class PipelineHandler:
                 self.tts_completion_event.clear()
 
                 # Create new TTS task
-                self.session.current_tts_task = asyncio.create_task(
-                    self._synthesize_speech(sentence)
-                )
+                self.session.current_tts_task = asyncio.create_task(self._synthesize_speech(sentence))
 
                 self.session.tts_queue.task_done()
 
@@ -218,13 +196,9 @@ class PipelineHandler:
             # Set event to allow next sentence to start
             self.tts_completion_event.set()
 
-    async def _send_websocket_message(self, message_type: str, **data) -> None:
+    async def _send_websocket_message(self, message_type: str, **data: object) -> None:
         """Send formatted message through websocket"""
-        message = {
-            "type": message_type,
-            "session_id": self.session.session_id,
-            **data
-        }
+        message = {"type": message_type, "session_id": self.session.session_id, **data}
         await self.websocket.send_json(message)
 
     async def cleanup(self) -> None:

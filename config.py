@@ -52,10 +52,10 @@ class Config:
     @classmethod
     def _validate_provider_config(cls) -> Dict[str, bool]:
         """Validate provider-specific configurations"""
-        validation_results = {}
+        validation_results: Dict[str, bool] = {}
 
         # Azure Speech validation (ASR/TTS)
-        azure_credentials_valid = cls.AZURE_SPEECH_KEY and cls.AZURE_SPEECH_REGION
+        azure_credentials_valid = bool(cls.AZURE_SPEECH_KEY and cls.AZURE_SPEECH_REGION)
         validation_results["azure"] = azure_credentials_valid
 
         # OpenAI validation
@@ -82,9 +82,7 @@ class Config:
 
         # Check LLM provider configuration
         if cls.LLM_PROVIDER == "openai" and not provider_validations["openai"]:
-            validation_errors.append(
-                "OpenAI API key missing: OPENAI_API_KEY required for LLM"
-            )
+            validation_errors.append("OpenAI API key missing: OPENAI_API_KEY required for LLM")
 
         # Check TTS provider configuration
         if cls.TTS_PROVIDER == "azure" and not provider_validations["azure"]:
@@ -92,9 +90,7 @@ class Config:
                 "Azure Speech credentials missing: AZURE_SPEECH_KEY and AZURE_SPEECH_REGION required for TTS"
             )
         elif cls.TTS_PROVIDER == "minimax" and not provider_validations["minimax"]:
-            validation_errors.append(
-                "MiniMax API key missing: MINIMAX_API_KEY required for TTS"
-            )
+            validation_errors.append("MiniMax API key missing: MINIMAX_API_KEY required for TTS")
 
         # Report validation errors
         if validation_errors:
@@ -111,38 +107,48 @@ class Config:
         config = {"provider": getattr(cls, f"{service_type.upper()}_PROVIDER")}
 
         if service_type.upper() == "ASR":
-            config.update({
-                "language": cls.ASR_LANGUAGE,
-                "energy_threshold": cls.VOICE_ENERGY_THRESHOLD,
-            })
+            config.update(
+                {
+                    "language": cls.ASR_LANGUAGE,
+                    "energy_threshold": cls.VOICE_ENERGY_THRESHOLD,
+                }
+            )
 
             if config["provider"] == "azure":
-                config.update({
-                    "speech_key": cls.AZURE_SPEECH_KEY,
-                    "speech_region": cls.AZURE_SPEECH_REGION,
-                })
+                config.update(
+                    {
+                        "speech_key": cls.AZURE_SPEECH_KEY,
+                        "speech_region": cls.AZURE_SPEECH_REGION,
+                    }
+                )
 
         elif service_type.upper() == "LLM":
             if config["provider"] == "openai":
-                config.update({
-                    "api_key": cls.OPENAI_API_KEY,
-                    "base_url": cls.OPENAI_BASE_URL,
-                    "model": cls.OPENAI_MODEL,
-                    "system_prompt": cls.OPENAI_SYSTEM_PROMPT,
-                })
+                config.update(
+                    {
+                        "api_key": cls.OPENAI_API_KEY,
+                        "base_url": cls.OPENAI_BASE_URL,
+                        "model": cls.OPENAI_MODEL,
+                        "system_prompt": cls.OPENAI_SYSTEM_PROMPT,
+                    }
+                )
 
         elif service_type.upper() == "TTS":
             if config["provider"] == "azure":
-                config.update({
-                    "speech_key": cls.AZURE_SPEECH_KEY,
-                    "speech_region": cls.AZURE_SPEECH_REGION,
-                    "voice": cls.AZURE_TTS_VOICE,
-                })
+                config.update(
+                    {
+                        "speech_key": cls.AZURE_SPEECH_KEY,
+                        "speech_region": cls.AZURE_SPEECH_REGION,
+                        "voice": cls.AZURE_TTS_VOICE,
+                    }
+                )
             elif config["provider"] == "minimax":
-                config.update({
-                    "api_key": cls.MINIMAX_API_KEY,
-                    "voice_id": cls.MINIMAX_VOICE_ID,
-                })
+                config.update(
+                    {
+                        "api_key": cls.MINIMAX_API_KEY,
+                        "voice_id": cls.MINIMAX_VOICE_ID,
+                    }
+                )
 
         return config
 

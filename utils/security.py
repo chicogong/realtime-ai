@@ -1,6 +1,6 @@
 """Security utilities for handling sensitive data"""
 
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Union
 
 
 class SensitiveDataMasker:
@@ -44,18 +44,18 @@ class SensitiveDataMasker:
             value = str(value)
 
         if not value:
-            return value
+            return str(value)
 
         # Check if this is a sensitive key
         if key and cls.is_sensitive_key(key):
             if len(value) <= 4:
                 return "*" * len(value)
-            return value[:2] + "*" * (len(value) - 4) + value[-2:]
+            return str(value[:2] + "*" * (len(value) - 4) + value[-2:])
 
-        return value
+        return str(value)
 
     @classmethod
-    def mask_dict(cls, data: Dict[str, Any]) -> Dict[str, str]:
+    def mask_dict(cls, data: Dict[str, Any]) -> Dict[str, Any]:
         """Mask all sensitive values in a dictionary
 
         Args:
@@ -64,7 +64,7 @@ class SensitiveDataMasker:
         Returns:
             New dictionary with sensitive values masked
         """
-        masked = {}
+        masked: Dict[str, Any] = {}
         for key, value in data.items():
             if isinstance(value, dict):
                 masked[key] = cls.mask_dict(value)
@@ -103,6 +103,6 @@ class SensitiveDataMasker:
         return masked_url
 
 
-def mask_sensitive(data: Dict[str, Any]) -> Dict[str, str]:
+def mask_sensitive(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convenience function to mask sensitive data in a dictionary"""
     return SensitiveDataMasker.mask_dict(data)

@@ -49,7 +49,7 @@ class TestVoiceActivityDetector:
         """Test detection with loud audio"""
         vad = VoiceActivityDetector(energy_threshold=0.01)
         # Create loud audio (16-bit PCM with high values)
-        loud_samples = []
+        loud_samples = bytearray()
         for i in range(100):
             # Alternate between high positive and negative values
             value = 20000 if i % 2 == 0 else -20000
