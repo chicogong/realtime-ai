@@ -1,6 +1,6 @@
 """WebSocket message models for validation using Pydantic"""
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class WebSocketCommand(BaseModel):
     """Base model for WebSocket commands from client"""
 
-    type: Literal["stop", "start", "reset", "interrupt"]
+    type: Literal["stop", "start", "reset", "interrupt", "text_input"]
 
 
 class StopCommand(WebSocketCommand):
@@ -33,6 +33,13 @@ class InterruptCommand(WebSocketCommand):
     """Interrupt command to stop current processing but keep connection"""
 
     type: Literal["interrupt"] = "interrupt"
+
+
+class TextInputCommand(WebSocketCommand):
+    """Text input command to send text directly to LLM (bypassing ASR)"""
+
+    type: Literal["text_input"] = "text_input"
+    text: str
 
 
 class WebSocketResponse(BaseModel):
@@ -94,7 +101,7 @@ class LLMStreamResponse(WebSocketResponse):
     is_final: bool = False
 
 
-def parse_command(data: dict) -> Optional[WebSocketCommand]:
+def parse_command(data: dict) -> Optional[Union[WebSocketCommand, "TextInputCommand"]]:
     """Parse and validate a WebSocket command
 
     Args:
@@ -110,6 +117,7 @@ def parse_command(data: dict) -> Optional[WebSocketCommand]:
         "start": StartCommand,
         "reset": ResetCommand,
         "interrupt": InterruptCommand,
+        "text_input": TextInputCommand,
     }
 
     model_class = command_models.get(cmd_type)

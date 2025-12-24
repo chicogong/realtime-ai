@@ -149,12 +149,15 @@ class WebSocketHandler:
                 "stop": self._handle_stop_command,
                 "start": lambda ws, asr, sid: asr.start_recognition(),
                 "reset": self._handle_reset_command,
-                "interrupt": self._handle_interrupt_command
+                "interrupt": self._handle_interrupt_command,
             }
 
             handler = command_handlers.get(command.type)
             if handler:
                 await handler(websocket, asr_service, session_id)
+            elif command.type == "text_input":
+                # Handle text input separately since it needs the text parameter
+                await self._handle_text_input_command(websocket, command.text, session_id)
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in command: {e}")
@@ -222,6 +225,25 @@ class WebSocketHandler:
             })
         else:
             logger.error(f"Cannot get session {session_id}, unable to process interrupt command")
+
+    async def _handle_text_input_command(self, websocket: WebSocket, text: str, session_id: str) -> None:
+        """Handle text input command - send text directly to LLM (bypassing ASR)"""
+        if not text.strip():
+            logger.warning(f"Empty text input received, session ID: {session_id}")
+            return
+
+        logger.info(f"Text input received: '{text[:50]}...', session ID: {session_id}")
+
+        # Send transcript to client (echo back user input) - use final_transcript type
+        await websocket.send_json({
+            "type": "final_transcript",
+            "content": text,
+            "is_partial": False,
+            "session_id": session_id
+        })
+
+        # Process the text through LLM pipeline
+        await process_final_transcript(websocket, text, session_id)
 
     async def _cleanup(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str, pipeline: PipelineHandler) -> None:
         """Clean up resources when connection ends"""
