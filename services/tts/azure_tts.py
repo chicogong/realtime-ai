@@ -9,13 +9,13 @@ from loguru import logger
 
 from config import Config
 from services.tts.base import BaseTTSService
+from utils.http_client import HTTPClientManager
 
 
 class AzureTTSService(BaseTTSService):
     """Azure TTS服务实现"""
 
     # 全局资源
-    _http_client: Optional[httpx.AsyncClient] = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
     def __init__(self, subscription_key: str, region: str, voice_name: str = Config.AZURE_TTS_VOICE) -> None:
@@ -38,14 +38,12 @@ class AzureTTSService(BaseTTSService):
 
     @classmethod
     async def get_http_client(cls) -> httpx.AsyncClient:
-        """获取或创建HTTP客户端
+        """获取共享HTTP客户端（使用连接池）
 
         Returns:
             HTTP客户端实例
         """
-        if cls._http_client is None or (cls._http_client is not None and cls._http_client.is_closed):
-            cls._http_client = httpx.AsyncClient()
-        return cls._http_client
+        return await HTTPClientManager.get_client()
 
     async def synthesize_text(self, text: str, websocket: WebSocket, is_first: bool = False) -> None:
         """将文本合成为语音并发送到客户端
@@ -249,11 +247,7 @@ class AzureTTSService(BaseTTSService):
         """关闭所有TTS资源"""
         # 取消所有活动任务
         await cls.interrupt_all()
-
-        # 关闭HTTP客户端
-        if cls._http_client is not None and not cls._http_client.is_closed:
-            await cls._http_client.aclose()
-            cls._http_client = None
+        # HTTP client is managed by HTTPClientManager, no need to close here
 
     async def close(self) -> None:
         """关闭TTS服务，释放资源"""

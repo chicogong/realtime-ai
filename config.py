@@ -4,6 +4,8 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 from loguru import logger
 
+from utils.security import mask_sensitive
+
 # Load environment variables
 load_dotenv()
 
@@ -143,6 +145,12 @@ class Config:
                 })
 
         return config
+
+    @classmethod
+    def get_service_config_masked(cls, service_type: str) -> Dict[str, str]:
+        """Get provider-specific configuration with sensitive data masked (for logging)"""
+        config = cls.get_service_config(service_type)
+        return mask_sensitive(config)
 
 
 # Validate configuration

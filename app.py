@@ -12,6 +12,7 @@ from loguru import logger
 
 from services.tts import close_all_tts_services
 from session import cleanup_inactive_sessions
+from utils.http_client import close_http_client
 from websocket.handler import handle_websocket_connection
 
 # Module-level cache for HTML content
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown: Cleanup resources and cancel tasks
     await close_all_tts_services()
+    await close_http_client()  # Close shared HTTP client
     cleanup_task.cancel()
     try:
         await cleanup_task

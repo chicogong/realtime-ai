@@ -218,6 +218,28 @@ class EventManager {
         ui.EventBinder.bindButtonClick('stop-btn', SessionManager.endConversation);
         ui.EventBinder.bindButtonClick('reset-btn', SessionManager.resetConversation);
         
+        // 绑定文本输入事件
+        ui.EventBinder.bindTextInput(
+            // 输入变化处理 - 根据输入内容和连接状态更新发送按钮
+            () => {
+                const hasText = ui.elements.textInput?.value.trim().length > 0;
+                const isConnected = websocketHandler.getSocket()?.readyState === WebSocket.OPEN;
+                ui.StateManager.updateSendButtonState(hasText && isConnected);
+            },
+            // 提交处理 - 发送文本消息
+            () => {
+                const text = ui.elements.textInput?.value.trim();
+                if (text && websocketHandler.getSocket()?.readyState === WebSocket.OPEN) {
+                    // 发送文本输入命令
+                    websocketHandler.sendCommand('text_input', { text });
+                    // 清空输入框
+                    ui.elements.textInput.value = '';
+                    // 禁用发送按钮
+                    ui.StateManager.updateSendButtonState(false);
+                }
+            }
+        );
+        
         // 音频上下文恢复
         ui.EventBinder.bindAudioContextResume(() => {
             const audioContext = audioProcessor.getAudioContext();
@@ -255,7 +277,17 @@ class EventManager {
  */
 function init() {
     try {
-        websocketHandler.initializeWebSocket(ui.StateManager.updateStatus, ui.elements.startButton);
+        // 连接成功回调 - 根据输入框内容更新发送按钮状态
+        const onConnected = () => {
+            const hasText = ui.elements.textInput?.value.trim().length > 0;
+            ui.StateManager.updateSendButtonState(hasText);
+        };
+        
+        websocketHandler.initializeWebSocket(
+            ui.StateManager.updateStatus,
+            ui.elements.startButton,
+            onConnected
+        );
         EventManager.initialize();
     } catch (error) {
         console.error('应用初始化错误:', error);

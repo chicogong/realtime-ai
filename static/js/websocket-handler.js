@@ -82,9 +82,11 @@ const websocketHandler = {
      * 建立与服务器的WebSocket连接，并设置各种事件处理器
      * @param {Function} updateStatus - 状态更新函数，用于更新UI状态
      * @param {HTMLButtonElement} startButton - 开始按钮元素，用于控制按钮状态
+     * @param {Function} onConnected - 连接成功回调函数（可选）
      */
-    initializeWebSocket(updateStatus, startButton) {
+    initializeWebSocket(updateStatus, startButton, onConnected = null) {
         this.statusCallback = updateStatus;
+        this._onConnectedCallback = onConnected;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
@@ -102,6 +104,10 @@ const websocketHandler = {
             this._updateStatus('idle', '已连接，准备就绪');
             startButton.disabled = false;
             audioProcessor.initAudioContext();
+            // 触发连接成功回调
+            if (this._onConnectedCallback) {
+                this._onConnectedCallback();
+            }
         };
         
         // 消息处理
@@ -116,7 +122,7 @@ const websocketHandler = {
             // 延迟重连
             setTimeout(() => {
                 console.log('尝试重新连接...');
-                this.initializeWebSocket(updateStatus, startButton);
+                this.initializeWebSocket(updateStatus, startButton, onConnected);
             }, WS_CONFIG.RECONNECT_DELAY);
         };
         
@@ -370,13 +376,13 @@ const websocketHandler = {
 
     /**
      * 发送命令到服务器
-     * @param {string} command - 命令名称
+     * @param {string} command - 命令名称 (type字段)
      * @param {Object} commandData - 命令附加数据
      */
     sendCommand(command, commandData = {}) {
         if (this.socket?.readyState === WebSocket.OPEN) {
             const message = {
-                command,
+                type: command,  // 后端期望 'type' 字段
                 ...commandData
             };
             this.socket.send(JSON.stringify(message));

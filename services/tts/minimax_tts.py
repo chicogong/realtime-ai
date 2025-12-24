@@ -9,13 +9,13 @@ from fastapi import WebSocket
 from loguru import logger
 
 from services.tts.base import BaseTTSService
+from utils.http_client import HTTPClientManager
 
 
 class MiniMaxTTSService(BaseTTSService):
     """MiniMax TTS服务实现"""
 
     # 全局资源
-    _http_client: Optional[httpx.AsyncClient] = None  # 共享HTTP客户端
     active_tasks: Set[asyncio.Task] = set()  # 活动任务集合，用于中断
 
     def __init__(self, api_key: str, voice_id: str = "male-qn-qingse") -> None:
@@ -47,16 +47,12 @@ class MiniMaxTTSService(BaseTTSService):
 
     @classmethod
     async def get_http_client(cls) -> httpx.AsyncClient:
-        """获取或创建HTTP客户端
+        """获取共享HTTP客户端（使用连接池）
 
         Returns:
             HTTP客户端实例
         """
-        if cls._http_client is None or (cls._http_client is not None and cls._http_client.is_closed):
-            # 设置超时参数
-            timeout = httpx.Timeout(30.0, connect=10.0)
-            cls._http_client = httpx.AsyncClient(timeout=timeout)
-        return cls._http_client
+        return await HTTPClientManager.get_client()
 
     async def synthesize_text(self, text: str, websocket: WebSocket, is_first: bool = False) -> None:
         """将文本合成为语音并发送到客户端
@@ -369,11 +365,7 @@ class MiniMaxTTSService(BaseTTSService):
         """关闭所有MiniMax TTS资源"""
         # 中断所有活动任务
         await cls.interrupt_all()
-
-        # 关闭HTTP客户端
-        if cls._http_client is not None and not cls._http_client.is_closed:
-            await cls._http_client.aclose()
-            cls._http_client = None
+        # HTTP client is managed by HTTPClientManager, no need to close here
 
     async def close(self) -> None:
         """关闭当前TTS服务实例"""
