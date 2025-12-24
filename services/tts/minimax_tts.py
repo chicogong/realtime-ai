@@ -343,8 +343,9 @@ class MiniMaxTTSService(BaseTTSService):
         """
         interrupted = False
 
-        # 清空发送队列
-        while not self.send_queue.empty():
+        # 清空发送队列 - use bounded loop for efficiency
+        items_to_clear = self.send_queue.qsize()
+        for _ in range(items_to_clear):
             try:
                 self.send_queue.get_nowait()
                 self.send_queue.task_done()

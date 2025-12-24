@@ -55,8 +55,9 @@ class PipelineHandler:
             self.session.current_tts_task.cancel()
             logger.info("Cancelling current TTS task")
 
-        # Clear TTS queue
-        while not self.session.tts_queue.empty():
+        # Clear TTS queue - use bounded loop for efficiency
+        items_to_clear = self.session.tts_queue.qsize()
+        for _ in range(items_to_clear):
             try:
                 self.session.tts_queue.get_nowait()
                 self.session.tts_queue.task_done()

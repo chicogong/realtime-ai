@@ -76,9 +76,16 @@ class SessionState:
         self._clear_queues()
 
     def _clear_queues(self) -> None:
-        """Clear all pipeline queues"""
+        """Clear all pipeline queues efficiently
+
+        Uses a bounded loop to avoid potential infinite loops in edge cases
+        where items are added faster than removed.
+        """
         for queue in [self.asr_queue, self.llm_queue, self.tts_queue]:
-            while not queue.empty():
+            # Get current queue size and clear that many items
+            # This avoids race conditions with continuous queue.empty() checks
+            items_to_clear = queue.qsize()
+            for _ in range(items_to_clear):
                 try:
                     queue.get_nowait()
                     queue.task_done()

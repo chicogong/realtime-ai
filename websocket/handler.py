@@ -9,6 +9,7 @@ from loguru import logger
 from services.asr import BaseASRService, create_asr_service
 from session import get_session, remove_session
 from utils.audio import AudioProcessor
+from websocket.models import parse_command
 from websocket.pipeline import PipelineHandler
 
 
@@ -75,6 +76,8 @@ class WebSocketHandler:
             logger.info(f"Setting up ASR service, session ID: {session_id}")
             session.asr_recognizer = asr_service
             asr_service.set_websocket(websocket, loop, session_id)
+            # Inject callback to avoid circular import
+            asr_service.set_transcript_callback(process_final_transcript)
             asr_service.setup_handlers()
         return asr_service
 
@@ -95,10 +98,11 @@ class WebSocketHandler:
 
     async def _handle_audio_data(self, audio_data: bytes, asr_service: BaseASRService, session_id: str) -> None:
         """Process audio data and check for voice activity"""
-        has_voice, pcm_data = self.audio_processor.process_audio_data(audio_data, get_session(session_id))
+        # Get session once and reuse
+        session = get_session(session_id)
+        has_voice, pcm_data = self.audio_processor.process_audio_data(audio_data, session)
 
         if pcm_data:
-            session = get_session(session_id)
             # Check if voice should interrupt ongoing processing
             if session and has_voice and (session.is_tts_active or session.is_processing_llm):
                 if self.audio_processor.voice_detector.has_continuous_voice():
@@ -113,7 +117,17 @@ class WebSocketHandler:
         """Process text commands from client"""
         try:
             message = json.loads(text)
-            cmd_type = message.get("type")
+
+            # Validate command using Pydantic model
+            command = parse_command(message)
+            if not command:
+                logger.warning(f"Invalid or unknown command: {message.get('type')}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Invalid command type: {message.get('type')}",
+                    "session_id": session_id
+                })
+                return
 
             # Route commands to appropriate handlers
             command_handlers = {
@@ -123,15 +137,17 @@ class WebSocketHandler:
                 "interrupt": self._handle_interrupt_command
             }
 
-            handler = command_handlers.get(cmd_type)
+            handler = command_handlers.get(command.type)
             if handler:
-                # if cmd_type == "start":
-                #     await asr_service.start_recognition()
-                # else:
                 await handler(websocket, asr_service, session_id)
-            else:
-                logger.warning(f"Unknown command type: {cmd_type}")
 
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in command: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "message": "Invalid JSON format",
+                "session_id": session_id
+            })
         except Exception as e:
             logger.error(f"Command processing error: {e}")
             await websocket.send_json({
@@ -167,6 +183,8 @@ class WebSocketHandler:
             if session:
                 session.asr_recognizer = new_asr_service
                 new_asr_service.set_websocket(websocket, asyncio.get_running_loop(), session_id)
+                # Inject callback to avoid circular import
+                new_asr_service.set_transcript_callback(process_final_transcript)
                 new_asr_service.setup_handlers()
                 await new_asr_service.start_recognition()
         else:

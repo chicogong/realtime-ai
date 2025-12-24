@@ -1,13 +1,12 @@
 """Unit tests for utils/text.py"""
 
-import pytest
 
 from utils.text import clean_text, process_streaming_text, split_into_sentences
 
 
 class TestSplitIntoSentences:
     """Tests for split_into_sentences function
-    
+
     Note: The function uses lookbehind to split, preserving punctuation with the sentence.
     """
 
