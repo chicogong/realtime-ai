@@ -82,14 +82,29 @@ class WebSocketHandler:
         return asr_service
 
     async def _handle_messages(self, websocket: WebSocket, asr_service: BaseASRService, session_id: str) -> None:
-        """Process incoming WebSocket messages"""
+        """Process incoming WebSocket messages with timeout protection"""
+        # Timeout for receiving messages (seconds)
+        # Audio streams should send data frequently, so 60s is generous
+        MESSAGE_TIMEOUT = 60
+
         while True:
             try:
-                data = await websocket.receive()
+                # Add timeout to prevent zombie connections
+                data = await asyncio.wait_for(
+                    websocket.receive(),
+                    timeout=MESSAGE_TIMEOUT
+                )
                 if "bytes" in data:
                     await self._handle_audio_data(data["bytes"], asr_service, session_id)
                 elif "text" in data:
                     await self._handle_text_command(data["text"], websocket, asr_service, session_id)
+            except asyncio.TimeoutError:
+                logger.warning(f"WebSocket timeout (no message in {MESSAGE_TIMEOUT}s), closing: {session_id}")
+                try:
+                    await websocket.close(code=1000, reason="Timeout - no activity")
+                except Exception:
+                    pass
+                break
             except WebSocketDisconnect:
                 break
             except Exception as e:

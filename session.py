@@ -1,11 +1,15 @@
 import asyncio
 import time
 import uuid
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from config import Config
+
+# Thread-safe lock for session dictionary
+_sessions_lock = RLock()
 
 
 class SessionState:
@@ -98,25 +102,27 @@ _sessions: Dict[str, SessionState] = {}
 
 
 def get_session(session_id: str) -> SessionState:
-    """Get or create session state"""
-    if session_id not in _sessions:
-        _sessions[session_id] = SessionState(session_id)
-
-    # Update activity timestamp
-    _sessions[session_id].update_activity()
-    return _sessions[session_id]
+    """Get or create session state (thread-safe)"""
+    with _sessions_lock:
+        if session_id not in _sessions:
+            _sessions[session_id] = SessionState(session_id)
+        # Update activity timestamp
+        _sessions[session_id].update_activity()
+        return _sessions[session_id]
 
 
 def remove_session(session_id: str) -> None:
-    """Remove a session"""
-    if session_id in _sessions:
-        del _sessions[session_id]
-        logger.info(f"Session removed: {session_id}")
+    """Remove a session (thread-safe)"""
+    with _sessions_lock:
+        if session_id in _sessions:
+            del _sessions[session_id]
+            logger.info(f"Session removed: {session_id}")
 
 
 def get_all_sessions() -> Dict[str, SessionState]:
-    """Get all active sessions"""
-    return _sessions
+    """Get a copy of all active sessions (thread-safe)"""
+    with _sessions_lock:
+        return _sessions.copy()
 
 
 async def cleanup_inactive_sessions() -> None:
@@ -125,17 +131,20 @@ async def cleanup_inactive_sessions() -> None:
         try:
             await asyncio.sleep(60)  # Check every minute
 
-            inactive_session_ids = [
-                session_id
-                for session_id, state in _sessions.items()
-                if state.is_inactive()
-            ]
+            # Get inactive sessions with lock
+            with _sessions_lock:
+                inactive_session_ids = [
+                    session_id
+                    for session_id, state in _sessions.items()
+                    if state.is_inactive()
+                ]
 
             for session_id in inactive_session_ids:
                 logger.info(f"Cleaning up inactive session: {session_id}")
                 try:
-                    if _sessions[session_id].tts_processor:
-                        await _sessions[session_id].tts_processor.interrupt()
+                    session = get_session(session_id)
+                    if session.tts_processor:
+                        await session.tts_processor.interrupt()
                 except Exception as e:
                     logger.error(f"Error interrupting TTS processor: {e}")
 
