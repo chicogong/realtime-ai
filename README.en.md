@@ -15,6 +15,10 @@ English | [中文](README.md)
 
 A low-latency, high-quality real-time voice conversation platform that allows users to have natural conversations with AI through a microphone. The system uses a streaming architecture, supporting dynamic conversation flow with real-time interruption and intelligent turn detection.
 
+## Interface Preview
+
+![Web Interface](docs/images/web-interface.png)
+
 ## Architecture
 
 ```mermaid
